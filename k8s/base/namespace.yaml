@@ -2,13 +2,3 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: imagen
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: imagen-config
-  namespace: imagen
-data:
-  GOOGLE_CLOUD_PROJECT: "your-project-id"
-  GCS_BUCKET: "your-bucket-name"
-  DEVICE: "cuda"

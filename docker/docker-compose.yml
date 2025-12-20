@@ -125,6 +125,33 @@ services:
       - redis
       - pubsub
 
+  style-aged-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+      args:
+        WORKER: style_aged
+    profiles:
+      - gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
+      - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
+      - PUBSUB_EMULATOR_HOST=pubsub:8085
+      - FIRESTORE_EMULATOR_HOST=firestore:8080
+      - DEVICE=cuda
+    volumes:
+      - models:/models
+    depends_on:
+      - redis
+      - pubsub
+
   background-remove-worker:
     build:
       context: ..

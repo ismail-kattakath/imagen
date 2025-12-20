@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     pubsub_subscription_upscale: str = "upscale-jobs-sub"
     pubsub_subscription_enhance: str = "enhance-jobs-sub"
     pubsub_subscription_comic: str = "style-comic-jobs-sub"
+    pubsub_subscription_aged: str = "style-aged-jobs-sub"
     pubsub_subscription_background_remove: str = "background-remove-jobs-sub"
     
     # Model

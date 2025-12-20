@@ -6,4 +6,5 @@ resources:
   - upscale-worker.yaml
   - enhance-worker.yaml
   - comic-worker.yaml
+  - style-aged-worker.yaml
   - background-remove-worker.yaml

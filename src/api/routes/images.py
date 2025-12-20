@@ -69,6 +69,15 @@ async def comic_style(
     return await _process_upload(file, "style-comic", params.model_dump())
 
 
+@router.post("/style/aged", response_model=JobResponse)
+async def aged_style(
+    file: UploadFile = File(...),
+    params: StyleParams = Depends(),
+):
+    """Apply vintage/aged effect to image."""
+    return await _process_upload(file, "style-aged", params.model_dump())
+
+
 @router.post("/background/remove", response_model=JobResponse)
 async def remove_background(file: UploadFile = File(...)):
     """Remove background from image."""
