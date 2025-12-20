@@ -7,6 +7,7 @@ AI-powered image processing microservices platform built for Google Cloud Platfo
 - **Upscale** - 4x image upscaling using Stable Diffusion
 - **Enhance** - Image quality enhancement
 - **Comic Style** - Convert images to comic/cartoon style
+- **Aged Style** - Apply aged/vintage effect to images
 - **Background Remove** - Remove backgrounds from images
 
 ## Architecture
@@ -59,6 +60,7 @@ make api
 make worker-upscale
 make worker-enhance
 make worker-comic
+make worker-aged
 make worker-background-remove
 
 # Run tests
@@ -69,7 +71,7 @@ make test
 
 ### Model Management
 
-Models are downloaded automatically on first use (~14GB total). To speed up startup:
+Models are downloaded automatically on first use (~18.5GB total). To speed up startup:
 
 ```bash
 # Pre-download all models (recommended)
@@ -79,17 +81,18 @@ make download-models
 make worker-upscale  # Downloads on first run
 ```
 
-**See [MODEL_MANAGEMENT.md](MODEL_MANAGEMENT.md) for complete model management guide.**
+**See [docs/models/MODEL_MANAGEMENT.md](docs/models/MODEL_MANAGEMENT.md) for complete model management guide.**
 
 ### API Endpoints
 
 ```
-POST /api/v1/images/upscale      - Upscale image 4x
-POST /api/v1/images/enhance      - Enhance image quality
-POST /api/v1/images/style/comic  - Convert to comic style
+POST /api/v1/images/upscale           - Upscale image 4x
+POST /api/v1/images/enhance           - Enhance image quality
+POST /api/v1/images/style/comic       - Convert to comic style
+POST /api/v1/images/style/aged        - Apply aged/vintage effect
 POST /api/v1/images/background/remove - Remove background
 
-GET  /api/v1/jobs/{job_id}       - Get job status
+GET  /api/v1/jobs/{job_id}            - Get job status
 ```
 
 ### Example Usage
@@ -108,7 +111,7 @@ curl "http://localhost:8000/api/v1/jobs/abc-123"
 
 ## Deployment
 
-**See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for complete deployment instructions.**
+**See [docs/getting-started/FIRST_DEPLOYMENT.md](docs/getting-started/FIRST_DEPLOYMENT.md) for step-by-step deployment or [docs/deployment/PRODUCTION_DEPLOYMENT.md](docs/deployment/PRODUCTION_DEPLOYMENT.md) for complete deployment guide.**
 
 ### Infrastructure Setup
 
@@ -170,18 +173,27 @@ Environment variables:
 
 ## Documentation
 
+📚 **[Complete Documentation Index](docs/README.md)**
+
+### Quick Start Guides
+
+| Guide | Description |
+|-------|-------------|
+| [⚡ Quickstart](docs/getting-started/QUICKSTART.md) | Get running locally in 10 minutes |
+| [🚀 First Deployment](docs/getting-started/FIRST_DEPLOYMENT.md) | Deploy to production step-by-step |
+| [📖 System Design](docs/core-concepts/SYSTEM_DESIGN.md) | Complete architecture and design |
+
+### Key Documentation
+
 | Document | Description |
 |----------|-------------|
-| [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Cheat sheet for common commands |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Complete platform architecture |
-| [INFRASTRUCTURE_GUIDE.md](INFRASTRUCTURE_GUIDE.md) | Terraform, Kubernetes, and auto-scaling explained |
-| [CI_CD.md](CI_CD.md) | Automated build and deployment pipeline |
-| [MODEL_MANAGEMENT.md](MODEL_MANAGEMENT.md) | How models are loaded, cached, and managed |
-| [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Step-by-step production deployment |
-| [docker/README.md](docker/README.md) | Docker and local development setup |
-| [k8s/autoscaling/README.md](k8s/autoscaling/README.md) | HPA and auto-scaling configuration |
-| [terraform/README.md](terraform/README.md) | Terraform modules documentation |
-| [CHANGELOG.md](CHANGELOG.md) | Project history and changes |
+| [Quick Reference](docs/reference/QUICK_REFERENCE.md) | One-page cheat sheet for common commands |
+| [Configuration Reference](docs/reference/CONFIGURATION_REFERENCE.md) | All environment variables explained |
+| [Model Management](docs/models/MODEL_MANAGEMENT.md) | ML model lifecycle and caching |
+| [Infrastructure Guide](docs/infrastructure/INFRASTRUCTURE_OVERVIEW.md) | Terraform and Kubernetes basics |
+| [CI/CD Pipeline](docs/deployment/CICD_PIPELINE.md) | Automated build and deployment |
+| [Git Workflow](docs/development/GIT_WORKFLOW.md) | Git branching and commit conventions |
+| [Changelog](CHANGELOG.md) | Project history and changes |
 
 ## License
 

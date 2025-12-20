@@ -6,16 +6,17 @@ Complete guide for managing AI models in local development and production enviro
 
 ## Model Architecture Overview
 
-Imagen uses 4 different ML models from HuggingFace:
+Imagen uses 5 different ML models from HuggingFace:
 
 | Pipeline | Model ID | Size | Purpose |
 |----------|----------|------|---------|
 | **Upscale** | `stabilityai/stable-diffusion-x4-upscaler` | ~2.5GB | 4x image upscaling |
 | **Enhance** | `stabilityai/stable-diffusion-xl-refiner-1.0` | ~6GB | Image quality enhancement |
 | **Comic Style** | `nitrosocke/Ghibli-Diffusion` | ~4GB | Convert to comic/cartoon style |
+| **Aged Style** | `stabilityai/stable-diffusion-2-1` | ~5GB | Apply aged/vintage style |
 | **Background Remove** | `briaai/RMBG-1.4` | ~1GB | Remove image backgrounds |
 
-**Total Storage Required:** ~14GB for all models
+**Total Storage Required:** ~18.5GB for all models
 
 ---
 

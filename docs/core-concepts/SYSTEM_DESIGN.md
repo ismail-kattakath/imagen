@@ -243,7 +243,8 @@ imagen/
 │       ├── upscale-hpa.yaml        # HPA for upscale worker
 │       ├── enhance-hpa.yaml        # HPA for enhance worker
 │       ├── comic-hpa.yaml          # HPA for comic worker
-│       ├── background-remove-hpa.yaml
+│       ├── style-aged-hpa.yaml     # HPA for aged style worker
+│       ├── background-remove-hpa.yaml # HPA for background remove worker
 │       └── README.md               # Auto-scaling documentation
 │
 ├── terraform/                      # Infrastructure as Code
@@ -450,11 +451,12 @@ curl "https://api.example.com/api/v1/jobs/550e8400-e29b-41d4-a716-446655440000"
 │  │  │Mem: 16Gi     │  │Mem: 16Gi     │  │Mem: 16Gi     │      │ │
 │  │  └──────────────┘  └──────────────┘  └──────────────┘      │ │
 │  │                                                             │ │
-│  │  ┌──────────────┐                                          │ │
-│  │  │bg-remove-    │                                          │ │
-│  │  │worker        │                                          │ │
-│  │  │              │                                          │ │
-│  │  │replicas: 1-10│                                          │ │
+│  │  ┌──────────────┐  ┌──────────────┐                        │ │
+│  │  │aged-worker   │  │bg-remove-    │                        │ │
+│  │  │              │  │worker        │                        │ │
+│  │  │replicas: 1-10│  │              │                        │ │
+│  │  │GPU: T4       │  │replicas: 1-10│                        │ │
+│  │  │Mem: 16Gi     │  └──────────────┘                        │ │
 │  │  └──────────────┘                                          │ │
 │  │                                                             │ │
 │  └────────────────────────────────────────────────────────────┘ │
