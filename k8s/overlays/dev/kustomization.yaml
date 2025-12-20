@@ -1,0 +1,49 @@
+# =============================================================================
+# DEVELOPMENT OVERLAY
+# =============================================================================
+#
+# Usage:
+#   kubectl apply -k k8s/overlays/dev
+#
+# Before using, update the values below:
+#   1. Replace YOUR_PROJECT_ID with your GCP project ID
+#   2. Optionally adjust replica counts, resource limits, etc.
+#
+# =============================================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Reference the base configuration
+resources:
+  - ../../
+
+# Replace image names
+images:
+  - name: us-central1-docker.pkg.dev/PROJECT_ID/imagen/worker
+    newName: us-central1-docker.pkg.dev/YOUR_PROJECT_ID/imagen/worker  # ← CHANGE THIS!
+    newTag: latest
+
+# Override ConfigMap with dev values
+configMapGenerator:
+  - name: imagen-config
+    behavior: replace
+    literals:
+      - GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID        # ← CHANGE THIS!
+      - GCS_BUCKET=YOUR_PROJECT_ID-imagen-images    # ← CHANGE THIS!
+      - MODEL_CACHE_DIR=/models
+      - DEVICE=cuda
+      - TORCH_DTYPE=float16
+
+# Dev-specific patches (optional)
+patches:
+  # Scale down for dev (fewer replicas)
+  - patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 0
+      - op: replace
+        path: /spec/maxReplicas
+        value: 3
+    target:
+      kind: HorizontalPodAutoscaler

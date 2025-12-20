@@ -67,6 +67,23 @@ tf-apply:
 
 
 # Kubernetes Deployment
+
+# Using Kustomize (recommended)
+k8s-deploy-dev:
+	@echo "Deploying to development..."
+	@echo "Make sure to update PROJECT_ID in k8s/overlays/dev/kustomization.yaml first!"
+	kubectl apply -k k8s/overlays/dev
+
+k8s-deploy-prod:
+	@echo "Deploying to production..."
+	@echo "Make sure to update PROJECT_ID in k8s/overlays/prod/kustomization.yaml first!"
+	kubectl apply -k k8s/overlays/prod
+
+k8s-preview:
+	@echo "Preview what will be deployed (dev):"
+	kubectl kustomize k8s/overlays/dev
+
+# Legacy manual deployment (use kustomize instead)
 k8s-namespace:
 	kubectl apply -f k8s/base/namespace.yaml
 
@@ -100,7 +117,7 @@ k8s-watch:
 	watch -n 2 'kubectl get hpa -n imagen && echo "" && kubectl get pods -n imagen'
 
 # Full deployment
-k8s-deploy-all: k8s-namespace k8s-base k8s-workers k8s-autoscaling
+k8s-deploy-all: k8s-deploy-dev
 	@echo "Full deployment complete!"
 
 

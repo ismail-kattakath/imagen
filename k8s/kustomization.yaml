@@ -1,0 +1,21 @@
+# =============================================================================
+# BASE KUSTOMIZATION
+# =============================================================================
+#
+# This is the base configuration. Use overlays for environment-specific values.
+#
+# For manual deployment, use overlays:
+#   kubectl apply -k k8s/overlays/dev
+#   kubectl apply -k k8s/overlays/prod
+#
+# =============================================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - base
+  - workers
+  - autoscaling
+
+namespace: imagen
