@@ -70,11 +70,24 @@ class PubSubQueueService:
         def wrapped_callback(message: Message) -> None:
             try:
                 data = json.loads(message.data.decode("utf-8"))
+
+                # Check delivery attempt count to prevent infinite retries
+                delivery_attempt = message.delivery_attempt if hasattr(message, 'delivery_attempt') else 0
+                if delivery_attempt > 5:
+                    logger.error(
+                        f"Job {data.get('job_id')} exceeded max retries ({delivery_attempt} attempts), "
+                        f"acknowledging to prevent redelivery"
+                    )
+                    message.ack()
+                    return
+
                 callback(data)
                 message.ack()
                 logger.info(f"Processed job {data.get('job_id')}")
             except Exception as e:
-                logger.error(f"Error processing message: {e}")
+                logger.error(f"Error processing message: {e}", exc_info=True)
+                # Nack the message to retry, but only if we haven't exceeded retry limit
+                # The delivery_attempt check above will prevent infinite retries
                 message.nack()
         
         streaming_pull = self.subscriber.subscribe(

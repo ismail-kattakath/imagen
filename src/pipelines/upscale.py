@@ -1,10 +1,8 @@
 from PIL import Image
 from diffusers import StableDiffusionUpscalePipeline
-import torch
 
 from src.pipelines.base import BasePipeline
-from src.core.logging import logger
-from src.core.exceptions import ModelLoadError, ImageProcessingError
+from src.core.exceptions import ImageProcessingError
 
 
 class UpscalePipeline(BasePipeline):
@@ -23,26 +21,21 @@ class UpscalePipeline(BasePipeline):
         if self._loaded:
             return
 
-        try:
-            from src.core.config import settings
+        from src.core.config import settings
 
-            logger.info(f"Loading upscale model: {self.model_id}")
-            logger.info(f"Cache directory: {settings.model_cache_dir}")
-
-            self._pipeline = StableDiffusionUpscalePipeline.from_pretrained(
+        def _load():
+            pipeline = StableDiffusionUpscalePipeline.from_pretrained(
                 self.model_id,
                 torch_dtype=self.dtype,
                 cache_dir=settings.model_cache_dir,
             ).to(self.device)
-            
-            # Enable memory optimizations
-            self._pipeline.enable_attention_slicing()
-            
-            self._loaded = True
-            logger.info("Upscale model loaded successfully")
-            
-        except Exception as e:
-            raise ModelLoadError(f"Failed to load upscale model: {e}") from e
+            pipeline.enable_attention_slicing()
+            return pipeline
+
+        self._pipeline = self._load_with_error_handling(
+            f"upscale model: {self.model_id}", _load
+        )
+        self._loaded = True
     
     def process(
         self,
@@ -58,10 +51,8 @@ class UpscalePipeline(BasePipeline):
             raise ImageProcessingError("Pipeline not loaded. Call load() first.")
         
         try:
-            # Ensure image is RGB
-            if image.mode != "RGB":
-                image = image.convert("RGB")
-            
+            image = self._ensure_rgb(image)
+
             result = self._pipeline(
                 prompt=prompt,
                 image=image,

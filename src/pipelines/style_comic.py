@@ -1,10 +1,8 @@
 from PIL import Image
 from diffusers import StableDiffusionImg2ImgPipeline
-import torch
 
 from src.pipelines.base import BasePipeline
-from src.core.logging import logger
-from src.core.exceptions import ModelLoadError, ImageProcessingError
+from src.core.exceptions import ImageProcessingError
 
 
 class ComicStylePipeline(BasePipeline):
@@ -22,24 +20,21 @@ class ComicStylePipeline(BasePipeline):
         if self._loaded:
             return
 
-        try:
-            from src.core.config import settings
+        from src.core.config import settings
 
-            logger.info(f"Loading comic style model: {self.model_id}")
-            logger.info(f"Cache directory: {settings.model_cache_dir}")
-
-            self._pipeline = StableDiffusionImg2ImgPipeline.from_pretrained(
+        def _load():
+            pipeline = StableDiffusionImg2ImgPipeline.from_pretrained(
                 self.model_id,
                 torch_dtype=self.dtype,
                 cache_dir=settings.model_cache_dir,
             ).to(self.device)
-            
-            self._pipeline.enable_attention_slicing()
-            self._loaded = True
-            logger.info("Comic style model loaded")
-            
-        except Exception as e:
-            raise ModelLoadError(f"Failed to load: {e}") from e
+            pipeline.enable_attention_slicing()
+            return pipeline
+
+        self._pipeline = self._load_with_error_handling(
+            f"comic style model: {self.model_id}", _load
+        )
+        self._loaded = True
     
     def process(
         self,
@@ -54,9 +49,8 @@ class ComicStylePipeline(BasePipeline):
             raise ImageProcessingError("Pipeline not loaded")
         
         try:
-            if image.mode != "RGB":
-                image = image.convert("RGB")
-            
+            image = self._ensure_rgb(image)
+
             result = self._pipeline(
                 prompt=prompt,
                 image=image,

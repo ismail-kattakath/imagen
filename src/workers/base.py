@@ -50,13 +50,14 @@ class BaseWorker(ABC):
             logger.info(f"Completed job {job_id}")
             
         except Exception as e:
-            logger.error(f"Failed job {job_id}: {e}")
+            logger.error(f"Failed job {job_id}: {e}", exc_info=True)
             self.job_service.update_status(
                 job_id,
                 JobStatus.FAILED,
                 error=str(e),
             )
-            raise
+            # Don't re-raise to prevent worker crash and message re-delivery
+            # The job is already marked as failed in the database
     
     def run(self) -> None:
         """Start the worker."""

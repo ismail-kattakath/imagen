@@ -1,10 +1,8 @@
 from PIL import Image
 from transformers import pipeline
-import torch
 
 from src.pipelines.base import BasePipeline
-from src.core.logging import logger
-from src.core.exceptions import ModelLoadError, ImageProcessingError
+from src.core.exceptions import ImageProcessingError
 
 
 class BackgroundRemovePipeline(BasePipeline):
@@ -22,24 +20,21 @@ class BackgroundRemovePipeline(BasePipeline):
         if self._loaded:
             return
 
-        try:
-            from src.core.config import settings
+        from src.core.config import settings
 
-            logger.info(f"Loading background removal: {self.model_id}")
-            logger.info(f"Cache directory: {settings.model_cache_dir}")
-
-            self._pipeline = pipeline(
+        def _load():
+            return pipeline(
                 "image-segmentation",
                 model=self.model_id,
                 trust_remote_code=True,
                 device=0 if self.device == "cuda" else -1,
                 model_kwargs={"cache_dir": settings.model_cache_dir},
             )
-            self._loaded = True
-            logger.info("Background removal model loaded")
-            
-        except Exception as e:
-            raise ModelLoadError(f"Failed to load: {e}") from e
+
+        self._pipeline = self._load_with_error_handling(
+            f"background removal: {self.model_id}", _load
+        )
+        self._loaded = True
     
     def process(self, image: Image.Image, **kwargs) -> Image.Image:
         """Remove background from image."""
@@ -47,8 +42,7 @@ class BackgroundRemovePipeline(BasePipeline):
             raise ImageProcessingError("Pipeline not loaded")
 
         try:
-            if image.mode != "RGB":
-                image = image.convert("RGB")
+            image = self._ensure_rgb(image)
 
             # The RMBG model returns a mask, apply it to create transparent image
             result = self._pipeline(image)

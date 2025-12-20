@@ -41,9 +41,3 @@ async def startup():
             raise
     else:
         logger.info("Running in development mode - skipping GCP validation")
-
-
-@app.on_event("shutdown") 
-async def shutdown():
-    """Cleanup on shutdown."""
-    pass

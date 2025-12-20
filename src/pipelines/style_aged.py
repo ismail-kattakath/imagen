@@ -1,10 +1,8 @@
 from PIL import Image
 from diffusers import StableDiffusionImg2ImgPipeline
-import torch
 
 from src.pipelines.base import BasePipeline
-from src.core.logging import logger
-from src.core.exceptions import ModelLoadError, ImageProcessingError
+from src.core.exceptions import ImageProcessingError
 
 
 class AgedStylePipeline(BasePipeline):
@@ -21,20 +19,22 @@ class AgedStylePipeline(BasePipeline):
     def load(self) -> None:
         if self._loaded:
             return
-        
-        try:
-            logger.info(f"Loading aged style model: {self.model_id}")
-            self._pipeline = StableDiffusionImg2ImgPipeline.from_pretrained(
+
+        from src.core.config import settings
+
+        def _load():
+            pipeline = StableDiffusionImg2ImgPipeline.from_pretrained(
                 self.model_id,
                 torch_dtype=self.dtype,
+                cache_dir=settings.model_cache_dir,
             ).to(self.device)
-            
-            self._pipeline.enable_attention_slicing()
-            self._loaded = True
-            logger.info("Aged style model loaded")
-            
-        except Exception as e:
-            raise ModelLoadError(f"Failed to load: {e}") from e
+            pipeline.enable_attention_slicing()
+            return pipeline
+
+        self._pipeline = self._load_with_error_handling(
+            f"aged style model: {self.model_id}", _load
+        )
+        self._loaded = True
     
     def process(
         self,
@@ -50,9 +50,8 @@ class AgedStylePipeline(BasePipeline):
             raise ImageProcessingError("Pipeline not loaded")
         
         try:
-            if image.mode != "RGB":
-                image = image.convert("RGB")
-            
+            image = self._ensure_rgb(image)
+
             result = self._pipeline(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
