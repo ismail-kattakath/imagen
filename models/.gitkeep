@@ -1,0 +1,2 @@
+# This directory is for ML model weights
+# Models are downloaded at runtime or mounted from persistent storage

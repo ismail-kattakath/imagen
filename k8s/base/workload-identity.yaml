@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: imagen-worker
+  namespace: imagen
+  annotations:
+    iam.gke.io/gcp-service-account: imagen-worker@YOUR_PROJECT_ID.iam.gserviceaccount.com

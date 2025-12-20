@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: imagen-config
+  namespace: imagen
+data:
+  GOOGLE_CLOUD_PROJECT: "your-project-id"
+  GCS_BUCKET: "your-bucket-name"
+  MODEL_CACHE_DIR: "/models"
+  DEVICE: "cuda"
+  TORCH_DTYPE: "float16"

@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: comic-worker
+  namespace: imagen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: comic-worker
+  template:
+    metadata:
+      labels:
+        app: comic-worker
+    spec:
+      serviceAccountName: imagen-worker
+      
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-tesla-t4
+      
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      
+      containers:
+        - name: worker
+          image: us-central1-docker.pkg.dev/PROJECT_ID/imagen/worker:latest
+          args: ["-m", "src.workers.style_comic"]
+          command: ["python"]
+          
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "16Gi"
+            requests:
+              memory: "8Gi"
+              cpu: "2"
+          
+          envFrom:
+            - configMapRef:
+                name: imagen-config
+          
+          env:
+            - name: PUBSUB_SUBSCRIPTION
+              value: "style-comic-jobs-sub"
+            - name: HF_HOME
+              value: "/models/huggingface"
+          
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: models-pvc

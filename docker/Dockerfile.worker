@@ -1,0 +1,28 @@
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency files
+COPY pyproject.toml .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir .
+
+# Copy source code
+COPY src/ src/
+
+# Build argument for worker type
+ARG WORKER=upscale
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV HF_HOME=/models/huggingface
+
+# Run worker
+CMD python -m src.workers.${WORKER}

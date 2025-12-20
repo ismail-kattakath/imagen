@@ -1,0 +1,69 @@
+steps:
+  # Build API image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api:latest'
+      - '-f'
+      - 'docker/Dockerfile.api'
+      - '.'
+  
+  # Build worker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:latest'
+      - '-f'
+      - 'docker/Dockerfile.worker'
+      - '.'
+  
+  # Push images
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api']
+  
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker']
+  
+  # Deploy API to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'imagen-api'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+  
+  # Deploy workers to GKE (optional)
+  - name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'set'
+      - 'image'
+      - 'deployment/upscale-worker'
+      - 'worker=${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:${SHORT_SHA}'
+      - '-n'
+      - 'imagen'
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=${_REGION}'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=${_CLUSTER_NAME}'
+
+substitutions:
+  _REGION: us-central1
+  _CLUSTER_NAME: imagen-cluster
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api:${SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api:latest'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:${SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
