@@ -1,0 +1,145 @@
+# Custom Metrics Stackdriver Adapter
+# This allows HPA to read Pub/Sub metrics from Google Cloud Monitoring
+# Docs: https://github.com/GoogleCloudPlatform/k8s-stackdriver/tree/master/custom-metrics-stackdriver-adapter
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: custom-metrics
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: custom-metrics-stackdriver-adapter
+  namespace: custom-metrics
+  annotations:
+    iam.gke.io/gcp-service-account: metrics-adapter@PROJECT_ID.iam.gserviceaccount.com
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: custom-metrics:system:auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: custom-metrics-stackdriver-adapter
+    namespace: custom-metrics
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: custom-metrics-auth-reader
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: extension-apiserver-authentication-reader
+subjects:
+  - kind: ServiceAccount
+    name: custom-metrics-stackdriver-adapter
+    namespace: custom-metrics
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: custom-metrics-resource-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: custom-metrics-stackdriver-adapter
+    namespace: custom-metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: custom-metrics-stackdriver-adapter
+  namespace: custom-metrics
+  labels:
+    app: custom-metrics-stackdriver-adapter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: custom-metrics-stackdriver-adapter
+  template:
+    metadata:
+      labels:
+        app: custom-metrics-stackdriver-adapter
+    spec:
+      serviceAccountName: custom-metrics-stackdriver-adapter
+      containers:
+        - name: adapter
+          image: gcr.io/gke-release/custom-metrics-stackdriver-adapter:v0.14.2
+          command:
+            - /adapter
+            - --use-new-resource-model=true
+            - --fallback-for-container-metrics=true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: custom-metrics-stackdriver-adapter
+  namespace: custom-metrics
+  labels:
+    app: custom-metrics-stackdriver-adapter
+spec:
+  ports:
+    - port: 443
+      targetPort: 443
+  selector:
+    app: custom-metrics-stackdriver-adapter
+---
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta1.custom.metrics.k8s.io
+spec:
+  service:
+    name: custom-metrics-stackdriver-adapter
+    namespace: custom-metrics
+  group: custom.metrics.k8s.io
+  version: v1beta1
+  insecureSkipTLSVerify: true
+  groupPriorityMinimum: 100
+  versionPriority: 100
+---
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta2.custom.metrics.k8s.io
+spec:
+  service:
+    name: custom-metrics-stackdriver-adapter
+    namespace: custom-metrics
+  group: custom.metrics.k8s.io
+  version: v1beta2
+  insecureSkipTLSVerify: true
+  groupPriorityMinimum: 100
+  versionPriority: 200
+---
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta1.external.metrics.k8s.io
+spec:
+  service:
+    name: custom-metrics-stackdriver-adapter
+    namespace: custom-metrics
+  group: external.metrics.k8s.io
+  version: v1beta1
+  insecureSkipTLSVerify: true
+  groupPriorityMinimum: 100
+  versionPriority: 100

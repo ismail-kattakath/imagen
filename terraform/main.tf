@@ -1,16 +1,31 @@
+# =============================================================================
+# IMAGEN PLATFORM - MAIN TERRAFORM CONFIGURATION
+# =============================================================================
+#
+# This file orchestrates all infrastructure modules.
+# Each module is responsible for a specific GCP service.
+#
+# Deployment order (handled by depends_on):
+# 1. APIs (enable required GCP services)
+# 2. Storage, Pub/Sub, Firestore, Artifact Registry (in parallel)
+# 3. IAM (service accounts)
+# 4. GKE, Cloud Run (compute)
+# 5. Autoscaling (HPA metrics)
+#
+# =============================================================================
+
 terraform {
   required_version = ">= 1.0"
-  
+
   required_providers {
     google = {
       source  = "hashicorp/google"
       version = "~> 5.0"
     }
   }
-  
-  backend "gcs" {
-    # Configure in environments/*.tfvars
-  }
+
+  # Remote state in GCS (configure bucket in backend.tfvars)
+  backend "gcs" {}
 }
 
 provider "google" {
@@ -18,154 +33,130 @@ provider "google" {
   region  = var.region
 }
 
-# Enable required APIs
-resource "google_project_service" "apis" {
-  for_each = toset([
-    "run.googleapis.com",
-    "pubsub.googleapis.com",
-    "storage.googleapis.com",
-    "firestore.googleapis.com",
-    "container.googleapis.com",
-    "artifactregistry.googleapis.com",
-  ])
-  
-  service            = each.value
-  disable_on_destroy = false
+# =============================================================================
+# MODULE: APIs
+# Enable required GCP services
+# =============================================================================
+
+module "apis" {
+  source = "./modules/apis"
+
+  project_id = var.project_id
 }
 
-# Artifact Registry for Docker images
-resource "google_artifact_registry_repository" "images" {
-  location      = var.region
-  repository_id = "imagen"
-  format        = "DOCKER"
-  
-  depends_on = [google_project_service.apis]
+# =============================================================================
+# MODULE: STORAGE
+# Cloud Storage bucket for input/output images
+# =============================================================================
+
+module "storage" {
+  source = "./modules/storage"
+
+  project_id         = var.project_id
+  region             = var.region
+  lifecycle_age_days = var.storage_lifecycle_days
+
+  depends_on = [module.apis]
 }
 
-# Cloud Storage bucket for images
-resource "google_storage_bucket" "images" {
-  name     = "${var.project_id}-imagen-images"
-  location = var.region
-  
-  uniform_bucket_level_access = true
-  
-  lifecycle_rule {
-    condition {
-      age = 7  # Auto-delete after 7 days
-    }
-    action {
-      type = "Delete"
-    }
-  }
-  
-  cors {
-    origin          = ["*"]
-    method          = ["GET", "PUT", "POST"]
-    response_header = ["*"]
-    max_age_seconds = 3600
-  }
+# =============================================================================
+# MODULE: PUB/SUB
+# Job queues (topics + subscriptions)
+# =============================================================================
+
+module "pubsub" {
+  source = "./modules/pubsub"
+
+  job_types            = var.job_types
+  ack_deadline_seconds = 600 # 10 min for GPU jobs
+
+  depends_on = [module.apis]
 }
 
-# Pub/Sub topics and subscriptions
-locals {
-  job_types = ["upscale", "enhance", "style-comic", "background-remove"]
+# =============================================================================
+# MODULE: FIRESTORE
+# Job state database
+# =============================================================================
+
+module "firestore" {
+  source = "./modules/firestore"
+
+  region = var.region
+
+  depends_on = [module.apis]
 }
 
-resource "google_pubsub_topic" "jobs" {
-  for_each = toset(local.job_types)
-  name     = "${each.key}-jobs"
-  
-  depends_on = [google_project_service.apis]
+# =============================================================================
+# MODULE: ARTIFACT REGISTRY
+# Docker image repository
+# =============================================================================
+
+module "artifact_registry" {
+  source = "./modules/artifact-registry"
+
+  project_id = var.project_id
+  region     = var.region
+
+  depends_on = [module.apis]
 }
 
-resource "google_pubsub_subscription" "jobs" {
-  for_each = google_pubsub_topic.jobs
-  
-  name  = "${each.key}-sub"
-  topic = each.value.name
-  
-  ack_deadline_seconds       = 600  # 10 min for GPU jobs
-  message_retention_duration = "86400s"  # 24 hours
-  
-  retry_policy {
-    minimum_backoff = "10s"
-    maximum_backoff = "600s"
-  }
+# =============================================================================
+# MODULE: IAM
+# Service accounts and permissions
+# =============================================================================
+
+module "iam" {
+  source = "./modules/iam"
+
+  project_id = var.project_id
+
+  depends_on = [module.apis]
 }
 
-# Firestore database
-resource "google_firestore_database" "main" {
-  name        = "(default)"
-  location_id = var.region
-  type        = "FIRESTORE_NATIVE"
-  
-  depends_on = [google_project_service.apis]
+# =============================================================================
+# MODULE: GKE
+# Kubernetes cluster for GPU workers
+# =============================================================================
+
+module "gke" {
+  source = "./modules/gke"
+
+  project_id   = var.project_id
+  region       = var.region
+  cluster_name = var.gke_cluster_name
+
+  depends_on = [module.apis]
 }
 
-# Service account for workers
-resource "google_service_account" "worker" {
-  account_id   = "imagen-worker"
-  display_name = "Imagen GPU Worker"
+# =============================================================================
+# MODULE: CLOUD RUN
+# API service
+# =============================================================================
+
+module "cloud_run" {
+  source = "./modules/cloud-run"
+
+  project_id            = var.project_id
+  region                = var.region
+  service_name          = "imagen-api"
+  image                 = "${module.artifact_registry.api_image}:latest"
+  service_account_email = module.iam.api_service_account_email
+  gcs_bucket            = module.storage.bucket_name
+  min_instances         = var.api_min_instances
+  max_instances         = var.api_max_instances
+
+  depends_on = [module.iam, module.storage, module.artifact_registry]
 }
 
-# IAM bindings for worker
-resource "google_project_iam_member" "worker_storage" {
-  project = var.project_id
-  role    = "roles/storage.objectAdmin"
-  member  = "serviceAccount:${google_service_account.worker.email}"
-}
+# =============================================================================
+# MODULE: AUTOSCALING
+# HPA metrics adapter IAM
+# =============================================================================
 
-resource "google_project_iam_member" "worker_pubsub" {
-  project = var.project_id
-  role    = "roles/pubsub.subscriber"
-  member  = "serviceAccount:${google_service_account.worker.email}"
-}
+module "autoscaling" {
+  source = "./modules/autoscaling"
 
-resource "google_project_iam_member" "worker_firestore" {
-  project = var.project_id
-  role    = "roles/datastore.user"
-  member  = "serviceAccount:${google_service_account.worker.email}"
-}
+  project_id = var.project_id
 
-# Cloud Run API service
-resource "google_cloud_run_v2_service" "api" {
-  name     = "imagen-api"
-  location = var.region
-  
-  template {
-    containers {
-      image = "${var.region}-docker.pkg.dev/${var.project_id}/imagen/api:latest"
-      
-      env {
-        name  = "GOOGLE_CLOUD_PROJECT"
-        value = var.project_id
-      }
-      env {
-        name  = "GCS_BUCKET"
-        value = google_storage_bucket.images.name
-      }
-      
-      resources {
-        limits = {
-          cpu    = "1"
-          memory = "512Mi"
-        }
-      }
-    }
-    
-    scaling {
-      min_instance_count = 0
-      max_instance_count = 10
-    }
-  }
-  
-  depends_on = [google_project_service.apis]
-}
-
-# Allow unauthenticated access to API
-resource "google_cloud_run_v2_service_iam_member" "api_public" {
-  name     = google_cloud_run_v2_service.api.name
-  location = var.region
-  role     = "roles/run.invoker"
-  member   = "allUsers"
+  depends_on = [module.gke]
 }

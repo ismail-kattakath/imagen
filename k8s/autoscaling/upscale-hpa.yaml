@@ -1,0 +1,41 @@
+# HPA for Upscale Worker
+# Scales based on Pub/Sub queue depth (undelivered messages)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: upscale-worker-hpa
+  namespace: imagen
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: upscale-worker
+  
+  minReplicas: 1
+  maxReplicas: 10
+  
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: pubsub.googleapis.com|subscription|num_undelivered_messages
+          selector:
+            matchLabels:
+              resource.labels.subscription_id: upscale-jobs-sub
+        target:
+          type: AverageValue
+          averageValue: "2"  # Scale up when >2 messages per worker
+  
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60    # Wait 1 min before scaling up
+      policies:
+        - type: Pods
+          value: 4                       # Add max 4 pods at a time
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300   # Wait 5 min before scaling down
+      policies:
+        - type: Pods
+          value: 1                       # Remove 1 pod at a time
+          periodSeconds: 120

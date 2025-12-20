@@ -19,13 +19,13 @@ AI-powered image processing microservices platform built for Google Cloud Platfo
                                                   │
                     ┌─────────────────────────────┼───────┐
                     │                             ▼       │
-                    │           GKE Autopilot            │
-                    │   ┌─────────┐  ┌─────────┐        │
-                    │   │Upscale  │  │Enhance  │  ...   │
-                    │   │Worker   │  │Worker   │        │
-                    │   │(T4 GPU) │  │(T4 GPU) │        │
-                    │   └─────────┘  └─────────┘        │
-                    └───────────────────────────────────┘
+                    │           GKE Autopilot             │
+                    │   ┌─────────┐  ┌─────────┐          │
+                    │   │Upscale  │  │Enhance  │  ...     │
+                    │   │Worker   │  │Worker   │          │
+                    │   │(T4 GPU) │  │(T4 GPU) │          │
+                    │   └─────────┘  └─────────┘          │
+                    └─────────────────────────────────────┘
 ```
 
 ## Quick Start
@@ -167,6 +167,17 @@ Environment variables:
 | `GCS_BUCKET` | Storage bucket name | - |
 | `DEVICE` | PyTorch device | `cuda` |
 | `DEBUG` | Enable debug mode | `false` |
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Cheat sheet for common commands |
+| [INFRASTRUCTURE_GUIDE.md](INFRASTRUCTURE_GUIDE.md) | Terraform, Kubernetes, and auto-scaling explained |
+| [MODEL_MANAGEMENT.md](MODEL_MANAGEMENT.md) | How models are loaded, cached, and managed |
+| [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Step-by-step production deployment |
+| [k8s/autoscaling/README.md](k8s/autoscaling/README.md) | HPA and auto-scaling configuration |
+| [CHANGELOG.md](CHANGELOG.md) | Project history and changes |
 
 ## License
 

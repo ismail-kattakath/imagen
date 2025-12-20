@@ -64,3 +64,41 @@ tf-plan:
 
 tf-apply:
 	cd terraform && terraform apply -var-file=environments/dev.tfvars
+
+
+# Kubernetes Deployment
+k8s-namespace:
+	kubectl apply -f k8s/base/namespace.yaml
+
+k8s-base:
+	kubectl apply -f k8s/base/
+
+k8s-workers:
+	kubectl apply -f k8s/workers/
+
+# Auto-Scaling
+k8s-autoscaling-adapter:
+	@echo "Deploying Custom Metrics Adapter..."
+	kubectl apply -f k8s/autoscaling/custom-metrics-adapter.yaml
+
+k8s-autoscaling-hpa:
+	@echo "Deploying HPAs..."
+	kubectl apply -f k8s/autoscaling/upscale-hpa.yaml
+	kubectl apply -f k8s/autoscaling/enhance-hpa.yaml
+	kubectl apply -f k8s/autoscaling/comic-hpa.yaml
+	kubectl apply -f k8s/autoscaling/background-remove-hpa.yaml
+
+k8s-autoscaling: k8s-autoscaling-adapter k8s-autoscaling-hpa
+	@echo "Auto-scaling configured!"
+
+# Check HPA status
+k8s-hpa-status:
+	kubectl get hpa -n imagen
+
+# Watch scaling in real-time
+k8s-watch:
+	watch -n 2 'kubectl get hpa -n imagen && echo "" && kubectl get pods -n imagen'
+
+# Full deployment
+k8s-deploy-all: k8s-namespace k8s-base k8s-workers k8s-autoscaling
+	@echo "Full deployment complete!"
