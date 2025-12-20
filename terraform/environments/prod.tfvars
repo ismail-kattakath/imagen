@@ -25,3 +25,8 @@ gke_cluster_name = "imagen-prod"
 # Cloud Run API
 api_min_instances = 1   # Always keep 1 instance warm
 api_max_instances = 10  # Higher limit for prod
+
+# CI/CD (GitHub)
+# After connecting GitHub, uncomment and update:
+# github_owner = "your-username"
+# github_repo  = "imagen"

@@ -25,3 +25,8 @@ gke_cluster_name = "imagen-dev"
 # Cloud Run API
 api_min_instances = 0   # Scale to zero when idle
 api_max_instances = 5   # Lower limit for dev
+
+# CI/CD (GitHub)
+# After connecting GitHub, uncomment and update:
+# github_owner = "your-username"
+# github_repo  = "imagen"

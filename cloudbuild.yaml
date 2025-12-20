@@ -1,6 +1,33 @@
+# =============================================================================
+# IMAGEN PLATFORM - CLOUD BUILD CI/CD
+# =============================================================================
+#
+# Automatically builds and deploys on git push.
+#
+# Triggers:
+#   - Push to main branch → Deploy to production
+#   - Push to develop branch → Deploy to dev
+#   - Pull request → Build only (no deploy)
+#
+# =============================================================================
+
+timeout: 1800s  # 30 minutes max
+
+substitutions:
+  _REGION: us-central1
+  _GKE_CLUSTER: imagen-cluster
+  _NAMESPACE: imagen
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
 steps:
-  # Build API image
-  - name: 'gcr.io/cloud-builders/docker'
+  # ===========================================================================
+  # STEP 1: Build API Docker Image
+  # ===========================================================================
+  - id: 'build-api'
+    name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '-t'
@@ -10,9 +37,12 @@ steps:
       - '-f'
       - 'docker/Dockerfile.api'
       - '.'
-  
-  # Build worker image
-  - name: 'gcr.io/cloud-builders/docker'
+
+  # ===========================================================================
+  # STEP 2: Build Worker Docker Image
+  # ===========================================================================
+  - id: 'build-worker'
+    name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '-t'
@@ -22,48 +52,169 @@ steps:
       - '-f'
       - 'docker/Dockerfile.worker'
       - '.'
-  
-  # Push images
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api']
-  
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker']
-  
-  # Deploy API to Cloud Run
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
+
+  # ===========================================================================
+  # STEP 3: Push API Image
+  # ===========================================================================
+  - id: 'push-api'
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api'
+    waitFor:
+      - 'build-api'
+
+  # ===========================================================================
+  # STEP 4: Push Worker Image
+  # ===========================================================================
+  - id: 'push-worker'
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker'
+    waitFor:
+      - 'build-worker'
+
+  # ===========================================================================
+  # STEP 5: Deploy API to Cloud Run
+  # ===========================================================================
+  - id: 'deploy-api'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
     args:
       - 'run'
       - 'deploy'
       - 'imagen-api'
-      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api:${SHORT_SHA}'
-      - '--region=${_REGION}'
-      - '--platform=managed'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api:${SHORT_SHA}'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
       - '--allow-unauthenticated'
-  
-  # Deploy workers to GKE (optional)
-  - name: 'gcr.io/cloud-builders/kubectl'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '10'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--set-env-vars'
+      - 'GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GCS_BUCKET=${PROJECT_ID}-imagen-images'
+    waitFor:
+      - 'push-api'
+
+  # ===========================================================================
+  # STEP 6: Get GKE Credentials
+  # ===========================================================================
+  - id: 'gke-credentials'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
     args:
-      - 'set'
-      - 'image'
-      - 'deployment/upscale-worker'
-      - 'worker=${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:${SHORT_SHA}'
-      - '-n'
-      - 'imagen'
+      - 'container'
+      - 'clusters'
+      - 'get-credentials'
+      - '${_GKE_CLUSTER}'
+      - '--region'
+      - '${_REGION}'
+      - '--project'
+      - '${PROJECT_ID}'
+    waitFor:
+      - 'push-worker'
+
+  # ===========================================================================
+  # STEP 7: Update Worker Image in K8s Manifests
+  # ===========================================================================
+  - id: 'update-k8s-manifests'
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Update image tags in worker manifests
+        for file in k8s/workers/*.yaml; do
+          sed -i "s|image:.*worker.*|image: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:${SHORT_SHA}|g" "$file"
+        done
+    waitFor:
+      - 'gke-credentials'
+
+  # ===========================================================================
+  # STEP 8: Deploy K8s Base Resources
+  # ===========================================================================
+  - id: 'deploy-k8s-base'
+    name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'apply'
+      - '-f'
+      - 'k8s/base/'
     env:
       - 'CLOUDSDK_COMPUTE_REGION=${_REGION}'
-      - 'CLOUDSDK_CONTAINER_CLUSTER=${_CLUSTER_NAME}'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER}'
+    waitFor:
+      - 'update-k8s-manifests'
 
-substitutions:
-  _REGION: us-central1
-  _CLUSTER_NAME: imagen-cluster
+  # ===========================================================================
+  # STEP 9: Deploy Workers
+  # ===========================================================================
+  - id: 'deploy-k8s-workers'
+    name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'apply'
+      - '-f'
+      - 'k8s/workers/'
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=${_REGION}'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER}'
+    waitFor:
+      - 'deploy-k8s-base'
 
+  # ===========================================================================
+  # STEP 10: Deploy Auto-scaling (HPA)
+  # ===========================================================================
+  - id: 'deploy-k8s-autoscaling'
+    name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'apply'
+      - '-f'
+      - 'k8s/autoscaling/'
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=${_REGION}'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER}'
+    waitFor:
+      - 'deploy-k8s-workers'
+
+  # ===========================================================================
+  # STEP 11: Verify Deployment
+  # ===========================================================================
+  - id: 'verify-deployment'
+    name: 'gcr.io/cloud-builders/kubectl'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "=== Deployment Status ==="
+        echo ""
+        echo "Pods:"
+        kubectl get pods -n ${_NAMESPACE}
+        echo ""
+        echo "HPAs:"
+        kubectl get hpa -n ${_NAMESPACE}
+        echo ""
+        echo "=== Deployment Complete ==="
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=${_REGION}'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER}'
+    waitFor:
+      - 'deploy-k8s-autoscaling'
+
+# ===========================================================================
+# ARTIFACTS
+# ===========================================================================
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api:${SHORT_SHA}'
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api:latest'
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:${SHORT_SHA}'
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:latest'
-
-options:
-  logging: CLOUD_LOGGING_ONLY

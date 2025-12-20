@@ -173,10 +173,14 @@ Environment variables:
 | Document | Description |
 |----------|-------------|
 | [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Cheat sheet for common commands |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Complete platform architecture |
 | [INFRASTRUCTURE_GUIDE.md](INFRASTRUCTURE_GUIDE.md) | Terraform, Kubernetes, and auto-scaling explained |
+| [CI_CD.md](CI_CD.md) | Automated build and deployment pipeline |
 | [MODEL_MANAGEMENT.md](MODEL_MANAGEMENT.md) | How models are loaded, cached, and managed |
 | [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Step-by-step production deployment |
+| [docker/README.md](docker/README.md) | Docker and local development setup |
 | [k8s/autoscaling/README.md](k8s/autoscaling/README.md) | HPA and auto-scaling configuration |
+| [terraform/README.md](terraform/README.md) | Terraform modules documentation |
 | [CHANGELOG.md](CHANGELOG.md) | Project history and changes |
 
 ## License

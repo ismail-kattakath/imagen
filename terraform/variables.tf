@@ -78,3 +78,25 @@ variable "environment" {
   type        = string
   default     = "dev"
 }
+
+# -----------------------------------------------------------------------------
+# CLOUD BUILD (CI/CD)
+# -----------------------------------------------------------------------------
+
+variable "repository_type" {
+  description = "Repository type: GITHUB or CLOUD_SOURCE_REPOSITORIES"
+  type        = string
+  default     = "GITHUB"
+}
+
+variable "github_owner" {
+  description = "GitHub repository owner (username or org). Leave empty to skip trigger creation."
+  type        = string
+  default     = ""
+}
+
+variable "github_repo" {
+  description = "GitHub repository name"
+  type        = string
+  default     = "imagen"
+}

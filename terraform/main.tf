@@ -160,3 +160,22 @@ module "autoscaling" {
 
   depends_on = [module.gke]
 }
+
+
+# =============================================================================
+# MODULE: CLOUD BUILD
+# CI/CD triggers for automatic deployment
+# =============================================================================
+
+module "cloud_build" {
+  source = "./modules/cloud-build"
+
+  project_id       = var.project_id
+  region           = var.region
+  repository_type  = var.repository_type
+  github_owner     = var.github_owner
+  github_repo      = var.github_repo
+  gke_cluster_name = var.gke_cluster_name
+
+  depends_on = [module.gke, module.artifact_registry, module.cloud_run]
+}

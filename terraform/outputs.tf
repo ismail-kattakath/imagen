@@ -87,6 +87,20 @@ output "metrics_adapter_service_account" {
 }
 
 # -----------------------------------------------------------------------------
+# CI/CD
+# -----------------------------------------------------------------------------
+
+output "cloud_build_sa" {
+  description = "Cloud Build service account"
+  value       = module.cloud_build.cloud_build_sa
+}
+
+output "cicd_setup_instructions" {
+  description = "CI/CD setup instructions"
+  value       = module.cloud_build.setup_instructions
+}
+
+# -----------------------------------------------------------------------------
 # QUICK START
 # -----------------------------------------------------------------------------
 

@@ -16,6 +16,7 @@ variable "apis" {
     "container.googleapis.com",
     "artifactregistry.googleapis.com",
     "monitoring.googleapis.com",
+    "cloudbuild.googleapis.com",
   ]
 }
 

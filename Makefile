@@ -102,3 +102,48 @@ k8s-watch:
 # Full deployment
 k8s-deploy-all: k8s-namespace k8s-base k8s-workers k8s-autoscaling
 	@echo "Full deployment complete!"
+
+
+# =============================================================================
+# CI/CD (Cloud Build)
+# =============================================================================
+
+# Trigger a manual build (without git push)
+build-manual:
+	gcloud builds submit --config=cloudbuild.yaml
+
+# Trigger PR check build
+build-pr-check:
+	gcloud builds submit --config=cloudbuild-pr.yaml
+
+# View build history
+build-history:
+	gcloud builds list --limit=10
+
+# View build logs
+build-logs:
+	@echo "Enter build ID:"
+	@read BUILD_ID && gcloud builds log $$BUILD_ID
+
+# Check Cloud Build triggers
+build-triggers:
+	gcloud builds triggers list
+
+# =============================================================================
+# FULL DEPLOYMENT (first time)
+# =============================================================================
+
+# Complete first-time deployment
+deploy-all: tf-apply build-manual
+	@echo ""
+	@echo "=============================================="
+	@echo "  DEPLOYMENT COMPLETE!"
+	@echo "=============================================="
+	@echo ""
+	@echo "  API URL: $$(terraform -chdir=terraform output -raw api_url)"
+	@echo ""
+	@echo "  Next steps:"
+	@echo "  1. Connect GitHub for automatic deployments"
+	@echo "  2. Update terraform with github_owner/github_repo"
+	@echo "  3. Push to main branch to trigger deployment"
+	@echo ""

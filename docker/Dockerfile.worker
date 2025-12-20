@@ -1,3 +1,27 @@
+# =============================================================================
+# GPU WORKER DOCKERFILE
+# =============================================================================
+#
+# Parameterized Dockerfile for all worker types.
+#
+# Build specific worker:
+#   docker build --build-arg WORKER=upscale -t imagen-worker-upscale .
+#   docker build --build-arg WORKER=enhance -t imagen-worker-enhance .
+#   docker build --build-arg WORKER=style_comic -t imagen-worker-comic .
+#   docker build --build-arg WORKER=background_remove -t imagen-worker-bg .
+#
+# Available workers:
+#   - upscale           (src/workers/upscale.py)
+#   - enhance           (src/workers/enhance.py)
+#   - style_comic       (src/workers/style_comic.py)
+#   - style_aged        (src/workers/style_aged.py)
+#   - background_remove (src/workers/background_remove.py)
+#
+# For production, Cloud Build creates one image with all workers,
+# and the WORKER env var selects which one to run.
+#
+# =============================================================================
+
 FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 
 WORKDIR /app
@@ -6,6 +30,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     build-essential \
     git \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files
@@ -17,12 +42,36 @@ RUN pip install --no-cache-dir .
 # Copy source code
 COPY src/ src/
 
-# Build argument for worker type
+# =============================================================================
+# WORKER SELECTION
+# =============================================================================
+# Build-time argument (default: upscale)
 ARG WORKER=upscale
 
-# Set environment variables
+# Runtime environment variable (can override at runtime)
+ENV WORKER=${WORKER}
+
+# =============================================================================
+# ENVIRONMENT
+# =============================================================================
 ENV PYTHONUNBUFFERED=1
 ENV HF_HOME=/models/huggingface
+ENV TRANSFORMERS_CACHE=/models/huggingface
+ENV TORCH_HOME=/models/torch
 
-# Run worker
+# Default to CUDA, falls back to CPU if not available
+ENV DEVICE=cuda
+
+# =============================================================================
+# HEALTH CHECK
+# =============================================================================
+# Workers don't have HTTP endpoints, so we check if the process is running
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD pgrep -f "python -m src.workers" || exit 1
+
+# =============================================================================
+# ENTRYPOINT
+# =============================================================================
+# Run the selected worker
+# Can be overridden at runtime: docker run -e WORKER=enhance imagen-worker
 CMD python -m src.workers.${WORKER}

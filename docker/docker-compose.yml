@@ -1,4 +1,22 @@
+# =============================================================================
+# LOCAL DEVELOPMENT - DOCKER COMPOSE
+# =============================================================================
+#
+# Usage:
+#   docker compose up                    # Start all services
+#   docker compose up api                # Start API only
+#   docker compose up upscale-worker     # Start specific worker
+#   docker compose --profile gpu up      # Start GPU workers (requires NVIDIA)
+#
+# Without GPU:
+#   docker compose up api redis minio    # API + dependencies only
+#
+# =============================================================================
+
 services:
+  # ===========================================================================
+  # API
+  # ===========================================================================
   api:
     build:
       context: ..
@@ -7,19 +25,33 @@ services:
       - "8000:8000"
     environment:
       - DEBUG=true
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
-      - GCS_BUCKET=${GCS_BUCKET}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
+      - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
+      - PUBSUB_EMULATOR_HOST=pubsub:8085
+      - FIRESTORE_EMULATOR_HOST=firestore:8080
+      - STORAGE_EMULATOR_HOST=http://minio:9000
     volumes:
       - ../src:/app/src:ro
     depends_on:
       - redis
+      - pubsub
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
+  # ===========================================================================
+  # GPU WORKERS (require NVIDIA GPU)
+  # ===========================================================================
   upscale-worker:
     build:
       context: ..
       dockerfile: docker/Dockerfile.worker
       args:
         WORKER: upscale
+    profiles:
+      - gpu
     deploy:
       resources:
         reservations:
@@ -28,21 +60,151 @@ services:
               count: 1
               capabilities: [gpu]
     environment:
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
-      - GCS_BUCKET=${GCS_BUCKET}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
+      - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
+      - PUBSUB_EMULATOR_HOST=pubsub:8085
+      - FIRESTORE_EMULATOR_HOST=firestore:8080
+      - DEVICE=cuda
     volumes:
       - models:/models
     depends_on:
       - redis
+      - pubsub
 
+  enhance-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+      args:
+        WORKER: enhance
+    profiles:
+      - gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
+      - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
+      - PUBSUB_EMULATOR_HOST=pubsub:8085
+      - FIRESTORE_EMULATOR_HOST=firestore:8080
+      - DEVICE=cuda
+    volumes:
+      - models:/models
+    depends_on:
+      - redis
+      - pubsub
+
+  comic-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+      args:
+        WORKER: style_comic
+    profiles:
+      - gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
+      - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
+      - PUBSUB_EMULATOR_HOST=pubsub:8085
+      - FIRESTORE_EMULATOR_HOST=firestore:8080
+      - DEVICE=cuda
+    volumes:
+      - models:/models
+    depends_on:
+      - redis
+      - pubsub
+
+  background-remove-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+      args:
+        WORKER: background_remove
+    profiles:
+      - gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
+      - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
+      - PUBSUB_EMULATOR_HOST=pubsub:8085
+      - FIRESTORE_EMULATOR_HOST=firestore:8080
+      - DEVICE=cuda
+    volumes:
+      - models:/models
+    depends_on:
+      - redis
+      - pubsub
+
+  # ===========================================================================
+  # CPU WORKERS (for testing without GPU)
+  # ===========================================================================
+  upscale-worker-cpu:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+      args:
+        WORKER: upscale
+    profiles:
+      - cpu
+    environment:
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
+      - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
+      - PUBSUB_EMULATOR_HOST=pubsub:8085
+      - FIRESTORE_EMULATOR_HOST=firestore:8080
+      - DEVICE=cpu
+    volumes:
+      - models:/models
+    depends_on:
+      - redis
+      - pubsub
+
+  # ===========================================================================
+  # INFRASTRUCTURE (Local Emulators)
+  # ===========================================================================
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # MinIO for local S3-compatible storage (optional)
+  # Pub/Sub emulator
+  pubsub:
+    image: gcr.io/google.com/cloudsdktool/cloud-sdk:emulators
+    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085
+    ports:
+      - "8085:8085"
+
+  # Firestore emulator
+  firestore:
+    image: gcr.io/google.com/cloudsdktool/cloud-sdk:emulators
+    command: gcloud beta emulators firestore start --host-port=0.0.0.0:8080
+    ports:
+      - "8080:8080"
+
+  # MinIO (S3-compatible storage, replaces GCS locally)
   minio:
     image: minio/minio
     command: server /data --console-address ":9001"
@@ -54,8 +216,17 @@ services:
       - MINIO_ROOT_PASSWORD=minioadmin
     volumes:
       - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
+# =============================================================================
+# VOLUMES
+# =============================================================================
 volumes:
   models:
+    name: imagen-models
   redis-data:
   minio-data:
