@@ -34,6 +34,12 @@ htmlcov/
 models/*
 !models/.gitkeep
 
+# Local storage (development)
+storage/
+
+# Logs
+*.log
+
 # Terraform
 terraform/.terraform/
 terraform/*.tfstate

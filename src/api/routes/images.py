@@ -4,13 +4,14 @@ import io
 import uuid
 
 from src.api.schemas import JobResponse, UpscaleParams, EnhanceParams, StyleParams
-from src.services import GCSStorageService, JobService
+from src.services import get_job_service
+from src.services.storage import get_storage_service
 from src.services.queue import get_queue_service
 
 router = APIRouter()
-storage = GCSStorageService()
+storage = get_storage_service()
 queue = get_queue_service()
-job_service = JobService()
+job_service = get_job_service()
 
 
 async def _process_upload(file: UploadFile, job_type: str, params: dict) -> JobResponse:

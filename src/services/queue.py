@@ -172,7 +172,9 @@ class RedisQueueService:
         ack_deadline: int = 600,
     ) -> None:
         """Subscribe to a Redis list (queue) with blocking pop."""
-        logger.info(f"Listening on Redis queue: {subscription_name}")
+        # Strip '-sub' suffix if present (Pub/Sub convention)
+        queue_name = subscription_name.removesuffix("-sub")
+        logger.info(f"Listening on Redis queue: {queue_name}")
         self._running = True
 
         retry_count = {}  # Track retry counts per job_id
@@ -180,7 +182,7 @@ class RedisQueueService:
         while self._running:
             try:
                 # BLPOP blocks until a message is available (timeout: 1 second)
-                result = self.redis.blpop(subscription_name, timeout=1)
+                result = self.redis.blpop(queue_name, timeout=1)
 
                 if result is None:
                     # No message available, continue waiting
@@ -211,7 +213,7 @@ class RedisQueueService:
                     retry_count[job_id] = current_retries + 1
                     # Re-queue the message for retry (with a small delay)
                     time.sleep(1)
-                    self.redis.rpush(subscription_name, message_bytes)
+                    self.redis.rpush(queue_name, message_bytes)
                     logger.info(f"Re-queued job {job_id} (attempt {retry_count[job_id]})")
 
             except KeyboardInterrupt:

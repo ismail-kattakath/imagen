@@ -2,8 +2,9 @@ from abc import ABC, abstractmethod
 from typing import Type
 
 from src.pipelines.base import BasePipeline
-from src.services import GCSStorageService, JobService, JobStatus
+from src.services import JobStatus, get_job_service
 from src.services.queue import get_queue_service
+from src.services.storage import get_storage_service
 from src.core.logging import logger
 
 
@@ -17,9 +18,9 @@ class BaseWorker(ABC):
     ):
         self.pipeline = pipeline_cls()
         self.subscription_name = subscription_name
-        self.storage = GCSStorageService()
+        self.storage = get_storage_service()
         self.queue = get_queue_service()
-        self.job_service = JobService()
+        self.job_service = get_job_service()
     
     def process_message(self, data: dict) -> None:
         """Process a single job message."""

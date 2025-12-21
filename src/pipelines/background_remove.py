@@ -44,27 +44,24 @@ class BackgroundRemovePipeline(BasePipeline):
         try:
             image = self._ensure_rgb(image)
 
-            # The RMBG model returns a mask, apply it to create transparent image
+            # The RMBG model returns an RGBA image where the alpha channel is the mask
             result = self._pipeline(image)
 
-            # Handle the segmentation result
-            if isinstance(result, list) and len(result) > 0:
-                # Get the mask from the first result
-                mask = result[0]["mask"]
-
-                # Convert original image to RGBA
-                rgba_image = image.convert("RGBA")
-
-                # Convert mask to L mode if needed
-                if mask.mode != "L":
-                    mask = mask.convert("L")
-
-                # Apply mask as alpha channel
-                rgba_image.putalpha(mask)
-                return rgba_image
+            # Extract the alpha channel as the mask
+            if result.mode == "RGBA":
+                mask = result.split()[3]  # Get alpha channel (index 3)
+            elif result.mode == "L":
+                mask = result
             else:
-                # Fallback if format is unexpected
-                return image.convert("RGBA")
+                # Fallback: convert to L mode
+                mask = result.convert("L")
+
+            # Convert original image to RGBA
+            rgba_image = image.convert("RGBA")
+
+            # Apply mask as alpha channel
+            rgba_image.putalpha(mask)
+            return rgba_image
 
         except Exception as e:
             raise ImageProcessingError(f"Background removal failed: {e}") from e
