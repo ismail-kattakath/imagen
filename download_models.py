@@ -12,7 +12,11 @@ from pathlib import Path
 def download_models(cache_dir: str = "./models"):
     """Download all models to cache directory."""
     try:
-        from diffusers import StableDiffusionUpscalePipeline, StableDiffusionImg2ImgPipeline
+        from diffusers import (
+            StableDiffusionUpscalePipeline,
+            StableDiffusionImg2ImgPipeline,
+            StableDiffusionXLImg2ImgPipeline,
+        )
         from transformers import pipeline as hf_pipeline
         import torch
     except ImportError as e:
@@ -28,47 +32,58 @@ def download_models(cache_dir: str = "./models"):
     print("Imagen Model Downloader")
     print("=" * 70)
     print(f"\nCache directory: {cache_path.absolute()}")
-    print(f"Total download size: ~14GB")
-    print(f"Estimated time: 5-20 minutes (depends on connection)\n")
-    
+    print(f"Total download size: ~18.5GB")
+    print(f"Estimated time: 10-30 minutes (depends on connection)\n")
+
     models = [
         {
             "name": "Upscale (4x)",
             "id": "stabilityai/stable-diffusion-x4-upscaler",
             "size": "~2.5GB",
             "loader": StableDiffusionUpscalePipeline,
+            "kwargs": {},
         },
         {
             "name": "Enhance (SDXL Refiner)",
             "id": "stabilityai/stable-diffusion-xl-refiner-1.0",
             "size": "~6GB",
-            "loader": StableDiffusionImg2ImgPipeline,
+            "loader": StableDiffusionXLImg2ImgPipeline,
+            "kwargs": {},
         },
         {
             "name": "Comic Style (Ghibli)",
             "id": "nitrosocke/Ghibli-Diffusion",
             "size": "~4GB",
             "loader": StableDiffusionImg2ImgPipeline,
+            "kwargs": {},
+        },
+        {
+            "name": "Aged Style (SD 1.5)",
+            "id": "runwayml/stable-diffusion-v1-5",
+            "size": "~5GB",
+            "loader": StableDiffusionImg2ImgPipeline,
+            "kwargs": {},
         },
     ]
-    
+
     # Download diffusers models
     for i, model in enumerate(models, 1):
-        print(f"[{i}/4] Downloading {model['name']} ({model['size']})...")
+        print(f"[{i}/5] Downloading {model['name']} ({model['size']})...")
         print(f"     Model ID: {model['id']}")
         try:
             model['loader'].from_pretrained(
                 model['id'],
                 cache_dir=str(cache_path),
                 torch_dtype=torch.float16,
+                **model['kwargs'],
             )
             print(f"     ✓ Downloaded successfully\n")
         except Exception as e:
             print(f"     ✗ Error: {e}\n")
             continue
-    
+
     # Download background removal model
-    print(f"[4/4] Downloading Background Removal (~1GB)...")
+    print(f"[5/5] Downloading Background Removal (~1GB)...")
     print(f"     Model ID: briaai/RMBG-1.4")
     try:
         hf_pipeline(

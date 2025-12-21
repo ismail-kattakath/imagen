@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     pubsub_subscription_background_remove: str = "background-remove-jobs-sub"
 
     # Model Configuration
-    model_cache_dir: str = "/models"  # Base directory for cached models
+    model_cache_dir: str = "./models"  # Base directory for cached models
     device: str | None = None  # PyTorch device ('cuda', 'cpu', or None for auto-detect)
     torch_dtype: str = "float16"  # Model precision (float16 for GPU, float32 for CPU)
 

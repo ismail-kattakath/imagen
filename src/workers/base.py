@@ -63,13 +63,17 @@ class BaseWorker(ABC):
         """Start the worker."""
         from src.core.config import settings
 
-        # Validate GCP configuration before starting
-        logger.info("Validating GCP configuration...")
-        try:
-            settings.validate_gcp_config()
-        except ValueError as e:
-            logger.error(f"Configuration validation failed: {e}")
-            raise
+        # Validate GCP configuration before starting (production only)
+        if settings.is_production():
+            logger.info("Validating GCP configuration for production...")
+            try:
+                settings.validate_gcp_config()
+                logger.info("GCP configuration validated successfully")
+            except ValueError as e:
+                logger.error(f"Configuration validation failed: {e}")
+                raise
+        else:
+            logger.info("Running in development mode - skipping GCP validation")
 
         logger.info(f"Starting worker for {self.subscription_name}")
 

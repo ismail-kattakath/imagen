@@ -18,6 +18,9 @@ worker-enhance:
 worker-comic:
 	python -m src.workers.style_comic
 
+worker-aged:
+	python -m src.workers.style_aged
+
 worker-background-remove:
 	python -m src.workers.background_remove
 

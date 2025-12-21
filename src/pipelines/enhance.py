@@ -1,13 +1,13 @@
 from PIL import Image
-from diffusers import StableDiffusionImg2ImgPipeline
+from diffusers import StableDiffusionXLImg2ImgPipeline
 
 from src.pipelines.base import BasePipeline
 from src.core.exceptions import ImageProcessingError
 
 
 class EnhancePipeline(BasePipeline):
-    """Image enhancement using Stable Diffusion img2img."""
-    
+    """Image enhancement using Stable Diffusion XL img2img."""
+
     def __init__(
         self,
         model_id: str = "stabilityai/stable-diffusion-xl-refiner-1.0",
@@ -15,7 +15,7 @@ class EnhancePipeline(BasePipeline):
     ):
         super().__init__(**kwargs)
         self.model_id = model_id
-    
+
     def load(self) -> None:
         if self._loaded:
             return
@@ -23,7 +23,7 @@ class EnhancePipeline(BasePipeline):
         from src.core.config import settings
 
         def _load():
-            pipeline = StableDiffusionImg2ImgPipeline.from_pretrained(
+            pipeline = StableDiffusionXLImg2ImgPipeline.from_pretrained(
                 self.model_id,
                 torch_dtype=self.dtype,
                 cache_dir=settings.model_cache_dir,

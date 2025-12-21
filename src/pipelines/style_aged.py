@@ -7,10 +7,10 @@ from src.core.exceptions import ImageProcessingError
 
 class AgedStylePipeline(BasePipeline):
     """Apply aged/vintage look to images."""
-    
+
     def __init__(
         self,
-        model_id: str = "stabilityai/stable-diffusion-2-1",
+        model_id: str = "runwayml/stable-diffusion-v1-5",
         **kwargs,
     ):
         super().__init__(**kwargs)
