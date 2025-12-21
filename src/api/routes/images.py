@@ -4,11 +4,12 @@ import io
 import uuid
 
 from src.api.schemas import JobResponse, UpscaleParams, EnhanceParams, StyleParams
-from src.services import GCSStorageService, PubSubQueueService, JobService
+from src.services import GCSStorageService, JobService
+from src.services.queue import get_queue_service
 
 router = APIRouter()
 storage = GCSStorageService()
-queue = PubSubQueueService()
+queue = get_queue_service()
 job_service = JobService()
 
 

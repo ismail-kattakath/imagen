@@ -2,13 +2,14 @@ from abc import ABC, abstractmethod
 from typing import Type
 
 from src.pipelines.base import BasePipeline
-from src.services import GCSStorageService, PubSubQueueService, JobService, JobStatus
+from src.services import GCSStorageService, JobService, JobStatus
+from src.services.queue import get_queue_service
 from src.core.logging import logger
 
 
 class BaseWorker(ABC):
     """Base class for GPU workers."""
-    
+
     def __init__(
         self,
         pipeline_cls: Type[BasePipeline],
@@ -17,7 +18,7 @@ class BaseWorker(ABC):
         self.pipeline = pipeline_cls()
         self.subscription_name = subscription_name
         self.storage = GCSStorageService()
-        self.queue = PubSubQueueService()
+        self.queue = get_queue_service()
         self.job_service = JobService()
     
     def process_message(self, data: dict) -> None:

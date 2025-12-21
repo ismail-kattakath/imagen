@@ -20,6 +20,7 @@ dependencies = [
     "google-cloud-firestore>=2.14.0",
     "httpx>=0.26.0",
     "python-multipart>=0.0.6",
+    "redis>=5.0.0",
 ]
 
 [project.optional-dependencies]
