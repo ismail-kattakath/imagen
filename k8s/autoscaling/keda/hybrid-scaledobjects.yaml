@@ -1,0 +1,121 @@
+# =============================================================================
+# KEDA HYBRID CONFIGURATION
+# =============================================================================
+#
+# Keeps the most popular pipeline (upscale) hot with 1 pod minimum.
+# Other pipelines scale to zero.
+#
+# Cost comparison:
+#   - Full scale-to-zero: ~$170/month (4 hrs/day usage)
+#   - Hybrid (1 hot pod): ~$350/month
+#   - All always-on: ~$1,400/month
+#
+# Use this if:
+#   - You need low latency for the primary pipeline
+#   - Cold starts are acceptable for secondary pipelines
+#
+# =============================================================================
+
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: gcp-pubsub-auth
+  namespace: imagen
+spec:
+  podIdentity:
+    provider: gcp
+
+---
+# -----------------------------------------------------------------------------
+# Upscale Worker - HOT (minReplicas: 1)
+# -----------------------------------------------------------------------------
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: upscale-worker-keda
+  namespace: imagen
+spec:
+  scaleTargetRef:
+    name: upscale-worker
+  
+  minReplicaCount: 1          # ← Always keep 1 pod warm
+  maxReplicaCount: 10
+  cooldownPeriod: 300
+  pollingInterval: 15
+  
+  triggers:
+    - type: gcp-pubsub
+      authenticationRef:
+        name: gcp-pubsub-auth
+      metadata:
+        subscriptionName: upscale-jobs-sub
+        subscriptionSize: "2"
+
+---
+# -----------------------------------------------------------------------------
+# Other Workers - COLD (minReplicas: 0)
+# -----------------------------------------------------------------------------
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: enhance-worker-keda
+  namespace: imagen
+spec:
+  scaleTargetRef:
+    name: enhance-worker
+  minReplicaCount: 0          # ← Scale to zero
+  maxReplicaCount: 10
+  cooldownPeriod: 300
+  pollingInterval: 15
+  triggers:
+    - type: gcp-pubsub
+      authenticationRef:
+        name: gcp-pubsub-auth
+      metadata:
+        subscriptionName: enhance-jobs-sub
+        subscriptionSize: "2"
+        activationSubscriptionSize: "1"
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: comic-worker-keda
+  namespace: imagen
+spec:
+  scaleTargetRef:
+    name: comic-worker
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  cooldownPeriod: 300
+  pollingInterval: 15
+  triggers:
+    - type: gcp-pubsub
+      authenticationRef:
+        name: gcp-pubsub-auth
+      metadata:
+        subscriptionName: style-comic-jobs-sub
+        subscriptionSize: "2"
+        activationSubscriptionSize: "1"
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: background-remove-worker-keda
+  namespace: imagen
+spec:
+  scaleTargetRef:
+    name: background-remove-worker
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  cooldownPeriod: 300
+  pollingInterval: 15
+  triggers:
+    - type: gcp-pubsub
+      authenticationRef:
+        name: gcp-pubsub-auth
+      metadata:
+        subscriptionName: background-remove-jobs-sub
+        subscriptionSize: "2"
+        activationSubscriptionSize: "1"

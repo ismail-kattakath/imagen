@@ -19,6 +19,16 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"  # API server bind address
     api_port: int = 8000  # API server port
     debug: bool = False  # Enable debug mode (disables GCP validation)
+    
+    # Authentication
+    jwt_secret: str | None = None  # JWT signing secret (required in production)
+    api_keys: list | None = None  # Pre-configured API keys (JSON list)
+    
+    # Rate Limiting
+    redis_url: str | None = None  # Redis URL for distributed rate limiting
+    
+    # CORS
+    cors_origins: list[str] | None = None  # Allowed CORS origins
 
     # Google Cloud Platform Configuration
     google_cloud_project: str = ""  # GCP project ID
@@ -80,7 +90,6 @@ class Settings(BaseSettings):
     
     # Local Development (Optional)
     # These settings are for local development with alternative services
-    redis_url: str | None = None  # Redis URL for local job queue
     minio_endpoint: str | None = None  # MinIO endpoint for local storage
     minio_access_key: str | None = None  # MinIO access key
     minio_secret_key: str | None = None  # MinIO secret key

@@ -111,6 +111,30 @@ k8s-autoscaling-hpa:
 k8s-autoscaling: k8s-autoscaling-adapter k8s-autoscaling-hpa
 	@echo "Auto-scaling configured!"
 
+# KEDA (Scale to Zero)
+keda-install:
+	helm repo add kedacore https://kedacore.github.io/charts
+	helm repo update
+	helm install keda kedacore/keda --namespace keda --create-namespace
+
+keda-deploy:
+	@echo "Deploying KEDA ScaledObjects (full scale-to-zero)..."
+	kubectl delete hpa -n imagen --all 2>/dev/null || true
+	kubectl apply -f k8s/autoscaling/keda/scaledobjects.yaml
+
+keda-deploy-hybrid:
+	@echo "Deploying KEDA ScaledObjects (hybrid - 1 hot pod)..."
+	kubectl delete hpa -n imagen --all 2>/dev/null || true
+	kubectl apply -f k8s/autoscaling/keda/hybrid-scaledobjects.yaml
+
+keda-status:
+	kubectl get scaledobject -n imagen
+
+keda-remove:
+	@echo "Removing KEDA, restoring standard HPAs..."
+	kubectl delete scaledobject -n imagen --all 2>/dev/null || true
+	kubectl apply -f k8s/autoscaling/
+
 # Check HPA status
 k8s-hpa-status:
 	kubectl get hpa -n imagen
