@@ -127,6 +127,14 @@ class Settings(BaseSettings):
         """Transformers cache directory."""
         return f"{self.model_cache_dir}/transformers"
 
+    # OpenTelemetry Configuration
+    otel_enabled: bool = True  # Enable OpenTelemetry tracing
+    otel_service_name: str = "imagen"  # Service name for tracing (overridden per service)
+    otel_exporter_otlp_endpoint: str | None = None  # OTLP endpoint (e.g., "http://jaeger:4317")
+    otel_exporter_console: bool = False  # Export traces to console (debugging)
+    otel_exporter_gcp_trace: bool = False  # Export to Google Cloud Trace (production)
+    otel_traces_sampler: str = "parentbased_always_on"  # Sampling strategy
+
     # Local Development (Optional)
     # These settings are for local development with alternative services
     minio_endpoint: str | None = None  # MinIO endpoint for local storage

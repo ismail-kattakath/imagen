@@ -19,6 +19,7 @@ from contextvars import ContextVar
 from datetime import datetime
 
 from fastapi import Request, Response
+from opentelemetry import trace
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.core.config import settings
@@ -64,10 +65,24 @@ class StructuredFormatter(logging.Formatter):
         request_id = request_id_var.get()
         if request_id:
             log_entry["request_id"] = request_id
+
+        # Add OpenTelemetry trace context
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            span_context = span.get_span_context()
+            trace_id = format(span_context.trace_id, "032x")
+            span_id = format(span_context.span_id, "016x")
+
             # Cloud Logging trace format
             log_entry["logging.googleapis.com/trace"] = (
-                f"projects/{settings.GOOGLE_CLOUD_PROJECT}/traces/{request_id}"
+                f"projects/{settings.GOOGLE_CLOUD_PROJECT}/traces/{trace_id}"
             )
+            log_entry["logging.googleapis.com/spanId"] = span_id
+            log_entry["logging.googleapis.com/trace_sampled"] = span_context.trace_flags.sampled
+
+            # Also add as standard fields
+            log_entry["trace_id"] = trace_id
+            log_entry["span_id"] = span_id
 
         # Add extra fields
         if hasattr(record, "extra"):

@@ -15,6 +15,8 @@ import threading
 import time
 from abc import ABC, abstractmethod
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 from prometheus_client import Counter, Gauge, Histogram, Info, start_http_server
 
 from src.core.logging import logger
@@ -22,6 +24,7 @@ from src.services import JobStatus, get_job_service
 from src.services.queue import get_queue_service
 from src.services.storage import get_storage_service
 from src.services.triton import get_triton_client
+from src.workers.instrumentation import create_job_span, create_storage_span, create_triton_span
 
 # =============================================================================
 # SLO CONFIGURATION
@@ -260,44 +263,73 @@ class TritonWorker(ABC):
         input_path = data["input_path"]
         params = data.get("params", {})
 
+        # Create root span for job processing
+        job_span = create_job_span(job_id, self.job_type, self.model_name)
+        job_span.set_attribute("input_path", input_path)
+        if params:
+            for key, value in params.items():
+                job_span.set_attribute(f"param.{key}", str(value))
+
         JOBS_IN_PROGRESS.labels(job_type=self.job_type).inc()
         start_time = time.time()
 
         try:
-            # Update status
-            self.job_service.update_status(job_id, JobStatus.PROCESSING)
+            # Make job span the current span
+            with trace.use_span(job_span, end_on_exit=False):
+                # Update status
+                self.job_service.update_status(job_id, JobStatus.PROCESSING)
 
-            # Download image
-            logger.info(f"Processing job {job_id} via Triton/{self.model_name}")
-            image = self.storage.download_image(input_path)
+                # Download image (with tracing)
+                logger.info(f"Processing job {job_id} via Triton/{self.model_name}")
+                download_span = create_storage_span("download", input_path)
+                with trace.use_span(download_span):
+                    image = self.storage.download_image(input_path)
+                    download_span.set_status(Status(StatusCode.OK))
+                    download_span.end()
 
-            # Run Triton inference
-            triton_start = time.time()
-            result = self.process_with_triton(image, params)
-            triton_duration = time.time() - triton_start
-            TRITON_LATENCY.labels(model_name=self.model_name).observe(triton_duration)
+                # Run Triton inference (with tracing)
+                triton_start = time.time()
+                triton_span = create_triton_span(self.model_name, "infer")
+                with trace.use_span(triton_span):
+                    result = self.process_with_triton(image, params)
+                    triton_duration = time.time() - triton_start
+                    triton_span.set_attribute("inference.duration_ms", triton_duration * 1000)
+                    triton_span.set_status(Status(StatusCode.OK))
+                    triton_span.end()
 
-            # Upload result
-            output_path = f"outputs/{job_id}/result.png"
-            self.storage.upload_image(result, output_path)
+                TRITON_LATENCY.labels(model_name=self.model_name).observe(triton_duration)
 
-            # Mark completed
-            self.job_service.update_status(
-                job_id,
-                JobStatus.COMPLETED,
-                output_path=output_path,
-            )
+                # Upload result (with tracing)
+                output_path = f"outputs/{job_id}/result.png"
+                upload_span = create_storage_span("upload", output_path)
+                with trace.use_span(upload_span):
+                    self.storage.upload_image(result, output_path)
+                    upload_span.set_status(Status(StatusCode.OK))
+                    upload_span.end()
 
-            # Record metrics
-            duration = time.time() - start_time
-            JOBS_COMPLETED.labels(job_type=self.job_type, status="success").inc()
-            JOB_PROCESSING_TIME.labels(job_type=self.job_type).observe(duration)
-            self._record_slo_metric(duration)
+                # Mark completed
+                self.job_service.update_status(
+                    job_id,
+                    JobStatus.COMPLETED,
+                    output_path=output_path,
+                )
 
-            logger.info(
-                f"Completed job {job_id} in {duration:.2f}s "
-                f"(Triton: {triton_duration:.2f}s, SLO: {self.slo_threshold}s)"
-            )
+                # Record metrics
+                duration = time.time() - start_time
+                JOBS_COMPLETED.labels(job_type=self.job_type, status="success").inc()
+                JOB_PROCESSING_TIME.labels(job_type=self.job_type).observe(duration)
+                self._record_slo_metric(duration)
+
+                # Add success attributes to job span
+                job_span.set_attribute("job.status", "completed")
+                job_span.set_attribute("job.duration_ms", duration * 1000)
+                job_span.set_attribute("job.output_path", output_path)
+                job_span.set_status(Status(StatusCode.OK))
+
+                logger.info(
+                    f"Completed job {job_id} in {duration:.2f}s "
+                    f"(Triton: {triton_duration:.2f}s, SLO: {self.slo_threshold}s)"
+                )
 
         except Exception as e:
             duration = time.time() - start_time
@@ -309,6 +341,12 @@ class TritonWorker(ABC):
             # Failed jobs also count as SLO violations
             JOB_SLO_VIOLATED.labels(job_type=self.job_type).inc()
 
+            # Record error in span
+            job_span.record_exception(e)
+            job_span.set_attribute("job.status", "failed")
+            job_span.set_attribute("job.error_type", error_type)
+            job_span.set_status(Status(StatusCode.ERROR, str(e)))
+
             logger.error(f"Failed job {job_id}: {e}", exc_info=True)
             self.job_service.update_status(
                 job_id,
@@ -317,12 +355,29 @@ class TritonWorker(ABC):
             )
         finally:
             JOBS_IN_PROGRESS.labels(job_type=self.job_type).dec()
+            job_span.end()
 
     def run(self) -> None:
         """Start the worker."""
         from src.core.config import settings
 
         self._running = True
+
+        # Initialize OpenTelemetry
+        if settings.otel_enabled:
+            from src.core.telemetry import setup_auto_instrumentation, setup_telemetry
+
+            environment = "production" if settings.is_production() else "development"
+            service_name = f"imagen-worker-{self.job_type}"
+            setup_telemetry(
+                service_name=service_name,
+                environment=environment,
+                endpoint=settings.otel_exporter_otlp_endpoint,
+                enable_console_export=settings.otel_exporter_console,
+                enable_gcp_trace=settings.otel_exporter_gcp_trace,
+            )
+            setup_auto_instrumentation()
+            logger.info(f"OpenTelemetry initialized for {service_name}")
 
         # Start metrics server
         self._start_metrics_server()

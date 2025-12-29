@@ -30,11 +30,18 @@ services:
       - PUBSUB_EMULATOR_HOST=pubsub:8085
       - FIRESTORE_EMULATOR_HOST=firestore:8080
       - STORAGE_EMULATOR_HOST=http://minio:9000
+      # OpenTelemetry
+      - OTEL_ENABLED=true
+      - OTEL_SERVICE_NAME=imagen-api
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_CONSOLE=false
+      - OTEL_EXPORTER_GCP_TRACE=false
     volumes:
       - ../src:/app/src:ro
     depends_on:
       - redis
       - pubsub
+      - jaeger
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -245,6 +252,23 @@ services:
       - minio-data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================================================
+  # OBSERVABILITY (Jaeger for tracing)
+  # ===========================================================================
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP gRPC receiver
+      - "4318:4318"    # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:16686/"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -43,6 +43,21 @@ async def lifespan(app: FastAPI):
     logger = setup_logging()
     logger.info("Starting Imagen API...")
 
+    # Initialize OpenTelemetry
+    if settings.otel_enabled:
+        from src.core.telemetry import setup_auto_instrumentation, setup_telemetry, shutdown_telemetry
+
+        environment = "production" if settings.is_production() else "development"
+        setup_telemetry(
+            service_name=settings.otel_service_name or "imagen-api",
+            environment=environment,
+            endpoint=settings.otel_exporter_otlp_endpoint,
+            enable_console_export=settings.otel_exporter_console,
+            enable_gcp_trace=settings.otel_exporter_gcp_trace,
+        )
+        setup_auto_instrumentation()
+        logger.info("OpenTelemetry initialized")
+
     # Validate configuration
     if settings.is_production():
         logger.info("Running in PRODUCTION mode")
@@ -63,6 +78,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    if settings.otel_enabled:
+        shutdown_telemetry()
     logger.info("Shutting down Imagen API...")
 
 
@@ -87,16 +104,23 @@ app = FastAPI(
 # 1. Request logging (outermost - logs everything)
 app.add_middleware(RequestLoggingMiddleware)
 
-# 2. Metrics collection
+# 2. OpenTelemetry tracing (adds custom span attributes)
+if settings.otel_enabled:
+    from src.api.middleware.tracing import TracingMiddleware, setup_fastapi_instrumentation
+
+    setup_fastapi_instrumentation(app)
+    app.add_middleware(TracingMiddleware)
+
+# 3. Metrics collection
 app.add_middleware(MetricsMiddleware)
 
-# 3. Rate limiting
+# 4. Rate limiting
 app.add_middleware(RateLimitMiddleware)
 
-# 4. Request size limiting
+# 5. Request size limiting
 app.add_middleware(SizeLimitMiddleware)
 
-# 5. CORS
+# 6. CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins or ["*"],

@@ -7,6 +7,9 @@ from typing import Protocol
 
 from google.cloud import pubsub_v1
 from google.cloud.pubsub_v1.subscriber.message import Message
+from opentelemetry import trace
+from opentelemetry.propagate import inject
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from src.core.config import settings
 from src.core.exceptions import QueueError
@@ -56,7 +59,7 @@ class PubSubQueueService:
         payload: dict,
         job_id: str | None = None,
     ) -> str:
-        """Publish a message to a Pub/Sub topic."""
+        """Publish a message to a Pub/Sub topic with trace context."""
         try:
             job_id = job_id or str(uuid.uuid4())
             topic_path = self.publisher.topic_path(self.project_id, topic_name)
@@ -66,8 +69,16 @@ class PubSubQueueService:
                 **payload,
             }
 
+            # Inject trace context into message attributes
+            carrier: dict[str, str] = {}
+            inject(carrier)  # Injects current trace context into carrier
+
             message_bytes = json.dumps(message_data).encode("utf-8")
-            future = self.publisher.publish(topic_path, message_bytes)
+            future = self.publisher.publish(
+                topic_path,
+                message_bytes,
+                **carrier,  # Pass trace context as message attributes
+            )
             message_id = future.result()
 
             logger.info(f"Published job {job_id} to {topic_name}")
@@ -82,12 +93,17 @@ class PubSubQueueService:
         callback: Callable[[dict], None],
         ack_deadline: int = 600,
     ) -> None:
-        """Subscribe to a Pub/Sub subscription with streaming pull."""
+        """Subscribe to a Pub/Sub subscription with streaming pull and trace context extraction."""
         subscription_path = self.subscriber.subscription_path(self.project_id, subscription_name)
+        propagator = TraceContextTextMapPropagator()
 
         def wrapped_callback(message: Message) -> None:
             try:
                 data = json.loads(message.data.decode("utf-8"))
+
+                # Extract trace context from message attributes
+                carrier = dict(message.attributes) if message.attributes else {}
+                ctx = propagator.extract(carrier)
 
                 # Check delivery attempt count to prevent infinite retries
                 delivery_attempt = (
@@ -101,7 +117,10 @@ class PubSubQueueService:
                     message.ack()
                     return
 
-                callback(data)
+                # Process callback with extracted trace context
+                with trace.use_span(trace.NonRecordingSpan(ctx), end_on_exit=False):
+                    callback(data)
+
                 message.ack()
                 logger.info(f"Processed job {data.get('job_id')}")
             except Exception as e:
