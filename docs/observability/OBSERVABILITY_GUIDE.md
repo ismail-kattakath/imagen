@@ -87,10 +87,11 @@ This guide covers the complete observability setup for the Imagen platform.
 | `imagen_jobs_completed_total` | Counter | job_type, status | Jobs processed |
 | `imagen_job_processing_seconds` | Histogram | job_type | Processing duration |
 | `imagen_jobs_in_progress` | Gauge | job_type | Active jobs |
-| `imagen_model_load_seconds` | Histogram | model_name | Model load time |
+| `imagen_triton_inference_seconds` | Histogram | model_name | Pure Triton inference time |
 | `imagen_worker_errors_total` | Counter | job_type, error_type | Worker errors |
 | `imagen_job_slo_met_total` | Counter | job_type | Jobs within SLO |
 | `imagen_job_slo_violated_total` | Counter | job_type | Jobs exceeding SLO |
+| `imagen_queue_depth` | Gauge | queue_name | Current queue depth |
 
 ### Recording Rules (Pre-computed)
 
@@ -289,7 +290,7 @@ kubectl describe pod -n imagen -l app=upscale-worker
 
 ### Adjusting SLOs
 
-Edit `src/workers/base.py`:
+Edit `src/workers/triton_worker.py`:
 
 ```python
 SLO_THRESHOLDS = {
@@ -313,11 +314,11 @@ k8s/monitoring/
 └── README.md                # Detailed documentation
 
 src/api/middleware/
-├── metrics.py               # API Prometheus metrics
+├── metrics.py               # API Prometheus metrics (requests, job creation)
 └── logging.py               # Structured logging
 
 src/workers/
-└── base.py                  # Worker metrics (updated)
+└── triton_worker.py         # Worker metrics (job completion, SLO, queue depth)
 ```
 
 ---

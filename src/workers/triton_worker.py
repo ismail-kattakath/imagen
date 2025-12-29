@@ -24,41 +24,78 @@ from src.services.storage import get_storage_service
 from src.services.triton import get_triton_client
 
 # =============================================================================
+# SLO CONFIGURATION
+# =============================================================================
+# Latency thresholds in seconds - jobs exceeding these are SLO violations
+
+SLO_THRESHOLDS = {
+    "upscale": 30,
+    "enhance": 45,
+    "style-comic": 60,
+    "style-aged": 60,
+    "background-remove": 15,
+}
+
+DEFAULT_SLO_THRESHOLD = 60  # Default for unknown job types
+
+# =============================================================================
 # WORKER METRICS
 # =============================================================================
+# NOTE: Metric names use 'imagen_' prefix (not 'imagen_triton_') to match
+# the alerting rules in k8s/monitoring/rules.yaml
 
-WORKER_INFO = Info("imagen_triton_worker", "Triton worker information")
+WORKER_INFO = Info("imagen_worker", "Worker information")
 
 JOBS_IN_PROGRESS = Gauge(
-    "imagen_triton_jobs_in_progress",
-    "Jobs currently being processed via Triton",
+    "imagen_jobs_in_progress",
+    "Jobs currently being processed",
     ["job_type"],
 )
 
 JOBS_COMPLETED = Counter(
-    "imagen_triton_jobs_completed_total",
-    "Jobs completed via Triton",
+    "imagen_jobs_completed_total",
+    "Total jobs completed",
     ["job_type", "status"],
 )
 
 JOB_PROCESSING_TIME = Histogram(
-    "imagen_triton_job_processing_seconds",
-    "Job processing time (including Triton inference)",
+    "imagen_job_processing_seconds",
+    "Job processing time in seconds",
     ["job_type"],
     buckets=(0.5, 1, 2, 5, 10, 15, 30, 45, 60, 90, 120),
 )
 
 TRITON_LATENCY = Histogram(
     "imagen_triton_inference_seconds",
-    "Pure Triton inference time",
+    "Pure Triton inference time (excludes I/O)",
     ["model_name"],
     buckets=(0.1, 0.5, 1, 2, 5, 10, 15, 30),
 )
 
 WORKER_ERRORS = Counter(
-    "imagen_triton_worker_errors_total",
-    "Errors in Triton workers",
+    "imagen_worker_errors_total",
+    "Errors in workers",
     ["job_type", "error_type"],
+)
+
+# SLO Metrics - tracks whether jobs meet latency SLOs
+JOB_SLO_MET = Counter(
+    "imagen_job_slo_met_total",
+    "Jobs completed within SLO threshold",
+    ["job_type"],
+)
+
+JOB_SLO_VIOLATED = Counter(
+    "imagen_job_slo_violated_total",
+    "Jobs that exceeded SLO threshold",
+    ["job_type"],
+)
+
+# Queue depth gauge - updated periodically by workers
+QUEUE_DEPTH = Gauge(
+    "imagen_queue_depth",
+    "Current queue depth (unprocessed messages)",
+    ["queue_name"],
 )
 
 
@@ -72,6 +109,7 @@ class TritonWorker(ABC):
     """
 
     METRICS_PORT = 8080
+    QUEUE_DEPTH_UPDATE_INTERVAL = 30  # seconds
 
     @property
     @abstractmethod
@@ -90,11 +128,15 @@ class TritonWorker(ABC):
         self.queue = get_queue_service()
         self.job_service = get_job_service()
         self.triton = get_triton_client()
+        self._queue_depth_thread: threading.Thread | None = None
+        self._running = False
 
-        # Convert underscores to hyphens for Pub/Sub topic naming convention
-        # This maintains consistency with API routes (e.g., "style-comic", "background-remove")
+        # Convert underscores to hyphens for job type naming
         # Model names use underscores (style_comic) but job types use hyphens (style-comic)
         self.job_type = self.model_name.replace("_", "-")
+
+        # Get SLO threshold for this job type
+        self.slo_threshold = SLO_THRESHOLDS.get(self.job_type, DEFAULT_SLO_THRESHOLD)
 
         WORKER_INFO.info(
             {
@@ -102,6 +144,7 @@ class TritonWorker(ABC):
                 "model_name": self.model_name,
                 "subscription": self.subscription_name,
                 "mode": "triton",
+                "slo_threshold_seconds": str(self.slo_threshold),
             }
         )
 
@@ -128,6 +171,88 @@ class TritonWorker(ABC):
 
         thread = threading.Thread(target=serve, daemon=True)
         thread.start()
+
+    def _start_queue_depth_monitor(self) -> None:
+        """Start background thread to periodically update queue depth metric."""
+
+        def monitor():
+            while self._running:
+                try:
+                    depth = self._get_queue_depth()
+                    if depth is not None:
+                        QUEUE_DEPTH.labels(queue_name=self.subscription_name).set(depth)
+                except Exception as e:
+                    logger.warning(f"Failed to get queue depth: {e}")
+                time.sleep(self.QUEUE_DEPTH_UPDATE_INTERVAL)
+
+        self._queue_depth_thread = threading.Thread(target=monitor, daemon=True)
+        self._queue_depth_thread.start()
+        logger.info(f"Started queue depth monitor (interval: {self.QUEUE_DEPTH_UPDATE_INTERVAL}s)")
+
+    def _get_queue_depth(self) -> int | None:
+        """
+        Get the current queue depth (undelivered messages).
+
+        For Pub/Sub, uses the Monitoring API. For Redis, uses LLEN.
+        Returns None if unable to retrieve.
+        """
+        try:
+            # Check if using Redis (local dev)
+            if hasattr(self.queue, 'redis'):
+                queue_name = self.subscription_name.removesuffix("-sub")
+                return self.queue.redis.llen(queue_name)
+
+            # For Pub/Sub, use the Admin API to get subscription info
+            # Note: This requires additional permissions (roles/pubsub.viewer)
+            from google.cloud import monitoring_v3
+            from src.core.config import settings
+
+            client = monitoring_v3.MetricServiceClient()
+            project_name = f"projects/{settings.google_cloud_project}"
+
+            # Query the Pub/Sub metric for undelivered messages
+            now = time.time()
+            interval = monitoring_v3.TimeInterval(
+                {
+                    "end_time": {"seconds": int(now)},
+                    "start_time": {"seconds": int(now - 60)},
+                }
+            )
+
+            results = client.list_time_series(
+                request={
+                    "name": project_name,
+                    "filter": (
+                        f'metric.type="pubsub.googleapis.com/subscription/num_undelivered_messages" '
+                        f'AND resource.labels.subscription_id="{self.subscription_name}"'
+                    ),
+                    "interval": interval,
+                    "view": monitoring_v3.ListTimeSeriesRequest.TimeSeriesView.FULL,
+                }
+            )
+
+            for result in results:
+                if result.points:
+                    return result.points[0].value.int64_value
+
+            return 0  # No messages
+
+        except ImportError:
+            logger.debug("Monitoring API not available for queue depth")
+            return None
+        except Exception as e:
+            logger.debug(f"Could not get queue depth: {e}")
+            return None
+
+    def _record_slo_metric(self, duration: float) -> None:
+        """Record whether job met or violated SLO threshold."""
+        if duration <= self.slo_threshold:
+            JOB_SLO_MET.labels(job_type=self.job_type).inc()
+        else:
+            JOB_SLO_VIOLATED.labels(job_type=self.job_type).inc()
+            logger.warning(
+                f"SLO violated for {self.job_type}: {duration:.2f}s > {self.slo_threshold}s threshold"
+            )
 
     def process_message(self, data: dict) -> None:
         """Process a single job message."""
@@ -167,9 +292,11 @@ class TritonWorker(ABC):
             duration = time.time() - start_time
             JOBS_COMPLETED.labels(job_type=self.job_type, status="success").inc()
             JOB_PROCESSING_TIME.labels(job_type=self.job_type).observe(duration)
+            self._record_slo_metric(duration)
 
             logger.info(
-                f"Completed job {job_id} in {duration:.2f}s (Triton: {triton_duration:.2f}s)"
+                f"Completed job {job_id} in {duration:.2f}s "
+                f"(Triton: {triton_duration:.2f}s, SLO: {self.slo_threshold}s)"
             )
 
         except Exception as e:
@@ -179,6 +306,8 @@ class TritonWorker(ABC):
             JOBS_COMPLETED.labels(job_type=self.job_type, status="failed").inc()
             JOB_PROCESSING_TIME.labels(job_type=self.job_type).observe(duration)
             WORKER_ERRORS.labels(job_type=self.job_type, error_type=error_type).inc()
+            # Failed jobs also count as SLO violations
+            JOB_SLO_VIOLATED.labels(job_type=self.job_type).inc()
 
             logger.error(f"Failed job {job_id}: {e}", exc_info=True)
             self.job_service.update_status(
@@ -193,8 +322,13 @@ class TritonWorker(ABC):
         """Start the worker."""
         from src.core.config import settings
 
+        self._running = True
+
         # Start metrics server
         self._start_metrics_server()
+
+        # Start queue depth monitor
+        self._start_queue_depth_monitor()
 
         # Validate config
         if settings.is_production():
@@ -211,13 +345,19 @@ class TritonWorker(ABC):
             time.sleep(10)
 
         logger.info(f"Triton model '{self.model_name}' is ready!")
-        logger.info(f"Starting worker for {self.subscription_name}")
+        logger.info(
+            f"Starting worker for {self.subscription_name} "
+            f"(SLO threshold: {self.slo_threshold}s)"
+        )
 
         # Start listening
-        self.queue.subscribe(
-            subscription_name=self.subscription_name,
-            callback=self.process_message,
-        )
+        try:
+            self.queue.subscribe(
+                subscription_name=self.subscription_name,
+                callback=self.process_message,
+            )
+        finally:
+            self._running = False
 
 
 # =============================================================================
