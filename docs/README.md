@@ -86,9 +86,10 @@ Security configuration and best practices.
 
 ### 📊 Observability
 
-Monitoring, metrics, and logging.
+Monitoring, metrics, logging, and tracing.
 
 - **[Observability Guide](observability/OBSERVABILITY_GUIDE.md)** - Prometheus metrics, logging, and monitoring
+- **[OpenTelemetry Guide](observability/OPENTELEMETRY_GUIDE.md)** - Distributed tracing and trace context propagation
 
 ---
 

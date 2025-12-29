@@ -25,6 +25,18 @@ dependencies = [
     "pyjwt>=2.8.0",
     # Metrics
     "prometheus-client>=0.19.0",
+    # OpenTelemetry
+    "opentelemetry-api>=1.22.0",
+    "opentelemetry-sdk>=1.22.0",
+    "opentelemetry-instrumentation-fastapi>=0.43b0",
+    "opentelemetry-instrumentation-httpx>=0.43b0",
+    "opentelemetry-instrumentation-redis>=0.43b0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.22.0",
+    "opentelemetry-exporter-gcp-trace>=1.6.0",
+    "opentelemetry-instrumentation-logging>=0.43b0",
+    # gRPC for Triton instrumentation
+    "tritonclient[grpc]>=2.40.0",
+    "google-cloud-monitoring>=2.18.0",
 ]
 
 [project.optional-dependencies]
