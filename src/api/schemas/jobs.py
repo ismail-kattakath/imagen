@@ -1,16 +1,20 @@
-from pydantic import BaseModel
 from datetime import datetime
+
+from pydantic import BaseModel
+
 from src.services.jobs import JobStatus
 
 
 class JobCreate(BaseModel):
     """Request to create a job."""
+
     job_type: str
     params: dict = {}
 
 
 class JobResponse(BaseModel):
     """Response after creating a job."""
+
     job_id: str
     status: JobStatus
     message: str = "Job queued successfully"
@@ -18,6 +22,7 @@ class JobResponse(BaseModel):
 
 class JobDetail(BaseModel):
     """Full job details."""
+
     job_id: str
     type: str
     status: JobStatus
@@ -32,5 +37,6 @@ class JobDetail(BaseModel):
 
 class ErrorResponse(BaseModel):
     """Error response."""
+
     error: str
     detail: str | None = None

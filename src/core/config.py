@@ -1,5 +1,6 @@
-from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -19,14 +20,14 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"  # API server bind address
     api_port: int = 8000  # API server port
     debug: bool = False  # Enable debug mode (disables GCP validation)
-    
+
     # Authentication
     jwt_secret: str | None = None  # JWT signing secret (required in production)
     api_keys: list | None = None  # Pre-configured API keys (JSON list)
-    
+
     # Rate Limiting
     redis_url: str | None = None  # Redis URL for distributed rate limiting
-    
+
     # CORS
     cors_origins: list[str] | None = None  # Allowed CORS origins
 
@@ -87,7 +88,7 @@ class Settings(BaseSettings):
     def transformers_cache(self) -> str:
         """Transformers cache directory."""
         return f"{self.model_cache_dir}/transformers"
-    
+
     # Local Development (Optional)
     # These settings are for local development with alternative services
     minio_endpoint: str | None = None  # MinIO endpoint for local storage

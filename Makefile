@@ -1,4 +1,4 @@
-.PHONY: dev api worker-upscale worker-enhance test lint format clean docker-build
+.PHONY: dev api test lint format clean docker-build triton-worker-upscale triton-worker-enhance triton-worker-background-remove
 
 # Development
 dev:
@@ -7,22 +7,6 @@ dev:
 
 api:
 	uvicorn src.api.main:app --host 0.0.0.0 --port 8000
-
-# Workers
-worker-upscale:
-	python -m src.workers.upscale
-
-worker-enhance:
-	python -m src.workers.enhance
-
-worker-comic:
-	python -m src.workers.style_comic
-
-worker-aged:
-	python -m src.workers.style_aged
-
-worker-background-remove:
-	python -m src.workers.background_remove
 
 # Models
 download-models:

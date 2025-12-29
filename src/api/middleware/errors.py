@@ -9,19 +9,19 @@
 #
 # =============================================================================
 
-from fastapi import Request, HTTPException
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
-from typing import Union
 import traceback
 
-from src.api.middleware.logging import ctx_logger, get_request_id
+from fastapi import HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from src.api.middleware.logging import ctx_logger, get_request_id
 
 # =============================================================================
 # ERROR RESPONSE FORMAT
 # =============================================================================
+
 
 def create_error_response(
     status_code: int,
@@ -37,10 +37,10 @@ def create_error_response(
             "request_id": get_request_id(),
         }
     }
-    
+
     if details:
         body["error"]["details"] = details
-    
+
     return JSONResponse(
         status_code=status_code,
         content=body,
@@ -51,9 +51,10 @@ def create_error_response(
 # EXCEPTION HANDLERS
 # =============================================================================
 
+
 async def http_exception_handler(
     request: Request,
-    exc: Union[HTTPException, StarletteHTTPException],
+    exc: HTTPException | StarletteHTTPException,
 ) -> JSONResponse:
     """Handle HTTP exceptions."""
     ctx_logger.warning(
@@ -62,7 +63,7 @@ async def http_exception_handler(
         detail=str(exc.detail),
         path=request.url.path,
     )
-    
+
     return create_error_response(
         status_code=exc.status_code,
         message=str(exc.detail),
@@ -78,18 +79,20 @@ async def validation_exception_handler(
     errors = []
     for error in exc.errors():
         field = " -> ".join(str(loc) for loc in error["loc"])
-        errors.append({
-            "field": field,
-            "message": error["msg"],
-            "type": error["type"],
-        })
-    
+        errors.append(
+            {
+                "field": field,
+                "message": error["msg"],
+                "type": error["type"],
+            }
+        )
+
     ctx_logger.warning(
         "Validation error",
         path=request.url.path,
         errors=errors,
     )
-    
+
     return create_error_response(
         status_code=422,
         message="Request validation failed",
@@ -111,15 +114,15 @@ async def generic_exception_handler(
         exception_message=str(exc),
         traceback=traceback.format_exc(),
     )
-    
+
     # Don't expose internal details in production
     from src.core.config import settings
-    
+
     if settings.is_production():
         message = "An internal error occurred. Please try again later."
     else:
         message = f"{type(exc).__name__}: {str(exc)}"
-    
+
     return create_error_response(
         status_code=500,
         message=message,
@@ -131,9 +134,10 @@ async def generic_exception_handler(
 # CUSTOM EXCEPTIONS
 # =============================================================================
 
+
 class ImagenException(Exception):
     """Base exception for Imagen API."""
-    
+
     def __init__(
         self,
         message: str,
@@ -150,7 +154,7 @@ class ImagenException(Exception):
 
 class JobNotFoundException(ImagenException):
     """Job not found."""
-    
+
     def __init__(self, job_id: str):
         super().__init__(
             message=f"Job not found: {job_id}",
@@ -162,7 +166,7 @@ class JobNotFoundException(ImagenException):
 
 class JobProcessingException(ImagenException):
     """Error during job processing."""
-    
+
     def __init__(self, job_id: str, reason: str):
         super().__init__(
             message=f"Job processing failed: {reason}",
@@ -174,7 +178,7 @@ class JobProcessingException(ImagenException):
 
 class QuotaExceededException(ImagenException):
     """Quota exceeded."""
-    
+
     def __init__(self, limit_type: str, limit: int, current: int):
         super().__init__(
             message=f"Quota exceeded: {limit_type}",
@@ -190,7 +194,7 @@ class QuotaExceededException(ImagenException):
 
 class InvalidImageException(ImagenException):
     """Invalid image file."""
-    
+
     def __init__(self, reason: str):
         super().__init__(
             message=f"Invalid image: {reason}",
@@ -212,7 +216,7 @@ async def imagen_exception_handler(
         details=exc.details,
         path=request.url.path,
     )
-    
+
     return create_error_response(
         status_code=exc.status_code,
         message=exc.message,
@@ -224,6 +228,7 @@ async def imagen_exception_handler(
 # =============================================================================
 # REGISTER HANDLERS
 # =============================================================================
+
 
 def register_exception_handlers(app):
     """Register all exception handlers with FastAPI app."""

@@ -1,6 +1,7 @@
+import io
+
 import pytest
 from PIL import Image
-import io
 
 
 @pytest.fixture

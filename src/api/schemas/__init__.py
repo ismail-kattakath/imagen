@@ -1,14 +1,14 @@
-from src.api.schemas.jobs import JobCreate, JobResponse, JobDetail, ErrorResponse
 from src.api.schemas.images import (
-    UpscaleParams,
+    BackgroundRemoveParams,
     EnhanceParams,
     StyleParams,
-    BackgroundRemoveParams,
+    UpscaleParams,
 )
+from src.api.schemas.jobs import ErrorResponse, JobCreate, JobDetail, JobResponse
 
 __all__ = [
     "JobCreate",
-    "JobResponse", 
+    "JobResponse",
     "JobDetail",
     "ErrorResponse",
     "UpscaleParams",

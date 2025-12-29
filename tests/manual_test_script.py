@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Test script for the Imagen API."""
+
 import sys
-import requests
 from pathlib import Path
+
+import requests
+
 
 def test_background_removal(image_path: str):
     """Test the background removal endpoint."""
@@ -13,20 +16,21 @@ def test_background_removal(image_path: str):
 
     # Open and upload the image
     filename = Path(image_path).name
-    with open(image_path, 'rb') as f:
-        files = {'file': (filename, f, 'image/png')}
+    with open(image_path, "rb") as f:
+        files = {"file": (filename, f, "image/png")}
         response = requests.post(url, files=files)
 
     if response.status_code == 200:
         result = response.json()
-        print(f"\n✓ Job created successfully!")
+        print("\n✓ Job created successfully!")
         print(f"  Job ID: {result['job_id']}")
         print(f"  Status: {result['status']}")
-        return result['job_id']
+        return result["job_id"]
     else:
         print(f"\n✗ Error: {response.status_code}")
         print(f"  Response: {response.text}")
         return None
+
 
 if __name__ == "__main__":
     # Default to test fixtures if no argument provided
@@ -43,6 +47,6 @@ if __name__ == "__main__":
     job_id = test_background_removal(image_path)
 
     if job_id:
-        print(f"\nMonitor the worker logs to see the job being processed!")
+        print("\nMonitor the worker logs to see the job being processed!")
         print(f"Job ID: {job_id}")
         print(f"\nCheck storage/outputs/{job_id}/ for the result!")

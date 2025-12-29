@@ -9,18 +9,14 @@
 #
 # =============================================================================
 
-from fastapi import HTTPException, Security, Depends, Request
-from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional, Dict
 from datetime import datetime, timedelta
-from functools import lru_cache
-import hashlib
-import hmac
+
 import jwt
+from fastapi import HTTPException, Request, Security
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
 from src.core.config import settings
 from src.core.logging import logger
-
 
 # =============================================================================
 # API KEY AUTHENTICATION
@@ -32,16 +28,16 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 class APIKeyManager:
     """
     Manages API keys with tier-based rate limits.
-    
+
     In production, this should be backed by a database (Firestore/PostgreSQL).
     """
-    
+
     def __init__(self):
         # In production, load from database
         # For now, use environment-based config
-        self._keys: Dict[str, dict] = {}
+        self._keys: dict[str, dict] = {}
         self._load_keys()
-    
+
     def _load_keys(self):
         """Load API keys from config or database."""
         # Default development key
@@ -55,31 +51,31 @@ class APIKeyManager:
                 "created_at": datetime.utcnow(),
                 "active": True,
             }
-        
+
         # Load from environment if configured
         if settings.API_KEYS:
             for key_config in settings.API_KEYS:
                 self._keys[key_config["key"]] = key_config
-    
-    def validate(self, api_key: str) -> Optional[dict]:
+
+    def validate(self, api_key: str) -> dict | None:
         """Validate API key and return metadata."""
         if not api_key:
             return None
-        
+
         key_data = self._keys.get(api_key)
         if not key_data:
             return None
-        
+
         if not key_data.get("active", True):
             return None
-        
+
         return key_data
-    
+
     def get_rate_limit(self, api_key: str) -> int:
         """Get rate limit for API key."""
         key_data = self._keys.get(api_key, {})
         return key_data.get("rate_limit", 10)  # Default: 10/min
-    
+
     def get_file_size_limit(self, api_key: str) -> int:
         """Get max file size in bytes."""
         key_data = self._keys.get(api_key, {})
@@ -96,7 +92,7 @@ async def get_api_key(
 ) -> dict:
     """
     Dependency to validate API key.
-    
+
     Usage:
         @router.post("/endpoint")
         async def endpoint(auth: dict = Depends(get_api_key)):
@@ -108,7 +104,7 @@ async def get_api_key(
             detail="Missing API key. Include X-API-Key header.",
             headers={"WWW-Authenticate": "ApiKey"},
         )
-    
+
     key_data = api_key_manager.validate(api_key)
     if not key_data:
         raise HTTPException(
@@ -116,13 +112,13 @@ async def get_api_key(
             detail="Invalid API key.",
             headers={"WWW-Authenticate": "ApiKey"},
         )
-    
+
     return {"api_key": api_key, **key_data}
 
 
 async def get_optional_api_key(
     api_key: str = Security(api_key_header),
-) -> Optional[dict]:
+) -> dict | None:
     """Optional API key - returns None if not provided."""
     if not api_key:
         return None
@@ -138,12 +134,12 @@ jwt_bearer = HTTPBearer(auto_error=False)
 
 class JWTManager:
     """JWT token management."""
-    
+
     def __init__(self):
         self.secret = settings.JWT_SECRET or "dev-secret-change-in-production"
         self.algorithm = "HS256"
         self.expiry_hours = 24
-    
+
     def create_token(self, user_id: str, claims: dict = None) -> str:
         """Create a JWT token."""
         payload = {
@@ -153,8 +149,8 @@ class JWTManager:
             **(claims or {}),
         }
         return jwt.encode(payload, self.secret, algorithm=self.algorithm)
-    
-    def verify_token(self, token: str) -> Optional[dict]:
+
+    def verify_token(self, token: str) -> dict | None:
         """Verify and decode JWT token."""
         try:
             payload = jwt.decode(token, self.secret, algorithms=[self.algorithm])
@@ -175,7 +171,7 @@ async def get_jwt_user(
 ) -> dict:
     """
     Dependency to validate JWT token.
-    
+
     Usage:
         @router.post("/endpoint")
         async def endpoint(user: dict = Depends(get_jwt_user)):
@@ -187,7 +183,7 @@ async def get_jwt_user(
             detail="Missing authentication token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     payload = jwt_manager.verify_token(credentials.credentials)
     if not payload:
         raise HTTPException(
@@ -195,13 +191,14 @@ async def get_jwt_user(
             detail="Invalid or expired token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     return payload
 
 
 # =============================================================================
 # FLEXIBLE AUTH (API Key OR JWT)
 # =============================================================================
+
 
 async def get_auth(
     request: Request,
@@ -210,7 +207,7 @@ async def get_auth(
 ) -> dict:
     """
     Accept either API key or JWT token.
-    
+
     Checks API key first, then JWT.
     """
     # Try API key first
@@ -218,13 +215,13 @@ async def get_auth(
         key_data = api_key_manager.validate(api_key)
         if key_data:
             return {"type": "api_key", "api_key": api_key, **key_data}
-    
+
     # Try JWT
     if jwt_credentials:
         payload = jwt_manager.verify_token(jwt_credentials.credentials)
         if payload:
             return {"type": "jwt", **payload}
-    
+
     raise HTTPException(
         status_code=401,
         detail="Authentication required. Provide X-API-Key header or Bearer token.",

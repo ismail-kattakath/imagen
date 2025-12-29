@@ -160,18 +160,24 @@ steps:
   # STEP 9: Update Image Tags in K8s Manifests
   # ===========================================================================
   - id: 'update-k8s-manifests'
-    name: 'gcr.io/cloud-builders/gcloud'
+    name: 'gcr.io/cloud-builders/kubectl'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        # Update worker image in workers manifests
-        for file in k8s/workers/*.yaml; do
-          sed -i "s|image:.*worker.*|image: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:${SHORT_SHA}|g" "$file"
-        done
-        
+        # Use Kustomize to update image tags in production overlay
+        cd k8s/overlays/prod
+
+        # Update worker image
+        kustomize edit set image \
+          us-central1-docker.pkg.dev/PROJECT_ID/imagen/worker=${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:${SHORT_SHA}
+
         # Update Triton image
-        sed -i "s|image:.*triton.*|image: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/triton:${SHORT_SHA}|g" k8s/triton/deployment.yaml
+        kustomize edit set image \
+          us-central1-docker.pkg.dev/PROJECT_ID/imagen/triton=${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/triton:${SHORT_SHA}
+
+        # Go back to root
+        cd ../../..
     waitFor:
       - 'gke-credentials'
 
