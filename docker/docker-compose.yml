@@ -1,15 +1,22 @@
 # =============================================================================
-# LOCAL DEVELOPMENT - DOCKER COMPOSE
+# LOCAL DEVELOPMENT - DOCKER COMPOSE (TRITON ARCHITECTURE)
 # =============================================================================
 #
-# Usage:
-#   docker compose up                    # Start all services
-#   docker compose up api                # Start API only
-#   docker compose up upscale-worker     # Start specific worker
-#   docker compose --profile gpu up      # Start GPU workers (requires NVIDIA)
+# This compose file implements the Triton-based architecture used in production.
 #
-# Without GPU:
-#   docker compose up api redis minio    # API + dependencies only
+# Architecture:
+#   - 1 Triton Inference Server (GPU) serves all 5 models
+#   - 5 CPU-only thin workers call Triton via gRPC
+#   - ~60-80% cost savings vs old 5-GPU-worker approach
+#
+# Usage:
+#   docker compose up                    # Start all infrastructure
+#   docker compose --profile triton up   # Add Triton (requires NVIDIA GPU)
+#   docker compose --profile workers up  # Add thin workers
+#   docker compose --profile all up      # Everything (requires GPU)
+#
+# Without GPU (API development only):
+#   docker compose up api redis minio pubsub firestore
 #
 # =============================================================================
 
@@ -49,165 +56,183 @@ services:
       retries: 3
 
   # ===========================================================================
-  # GPU WORKERS (require NVIDIA GPU)
+  # TRITON INFERENCE SERVER (requires NVIDIA GPU)
+  # ===========================================================================
+  triton:
+    build:
+      context: ..
+      dockerfile: triton/Dockerfile
+    profiles:
+      - triton
+      - all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "8001:8001"  # gRPC
+      - "8000:8000"  # HTTP
+      - "8002:8002"  # Metrics
+    environment:
+      - HF_HOME=/models/huggingface
+      - TRANSFORMERS_CACHE=/models/huggingface
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - models:/models/huggingface
+      - type: tmpfs
+        target: /dev/shm
+        tmpfs:
+          size: 2147483648  # 2GB shared memory
+    command:
+      - tritonserver
+      - --model-repository=/models/repository
+      - --log-verbose=1
+      - --log-info=true
+      - --metrics-port=8002
+      - --allow-metrics=true
+      - --strict-model-config=false
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v2/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s  # Models take time to load
+
+  # ===========================================================================
+  # THIN WORKERS (CPU-only, call Triton via gRPC)
   # ===========================================================================
   upscale-worker:
     build:
       context: ..
       dockerfile: docker/Dockerfile.worker
-      args:
-        WORKER: upscale
     profiles:
-      - gpu
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - workers
+      - all
     environment:
+      - MODEL_NAME=upscale
+      - TRITON_URL=triton:8001
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
       - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
       - PUBSUB_EMULATOR_HOST=pubsub:8085
       - FIRESTORE_EMULATOR_HOST=firestore:8080
-      - DEVICE=cuda
-    volumes:
-      - models:/models
+      - STORAGE_EMULATOR_HOST=http://minio:9000
+      - PUBSUB_SUBSCRIPTION_UPSCALE=upscale-sub
+      # OpenTelemetry
+      - OTEL_ENABLED=true
+      - OTEL_SERVICE_NAME=imagen-worker-upscale
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_CONSOLE=false
     depends_on:
       - redis
       - pubsub
+      - triton
 
   enhance-worker:
     build:
       context: ..
       dockerfile: docker/Dockerfile.worker
-      args:
-        WORKER: enhance
     profiles:
-      - gpu
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - workers
+      - all
     environment:
+      - MODEL_NAME=enhance
+      - TRITON_URL=triton:8001
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
       - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
       - PUBSUB_EMULATOR_HOST=pubsub:8085
       - FIRESTORE_EMULATOR_HOST=firestore:8080
-      - DEVICE=cuda
-    volumes:
-      - models:/models
+      - STORAGE_EMULATOR_HOST=http://minio:9000
+      - PUBSUB_SUBSCRIPTION_ENHANCE=enhance-sub
+      # OpenTelemetry
+      - OTEL_ENABLED=true
+      - OTEL_SERVICE_NAME=imagen-worker-enhance
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_CONSOLE=false
     depends_on:
       - redis
       - pubsub
+      - triton
 
   comic-worker:
     build:
       context: ..
       dockerfile: docker/Dockerfile.worker
-      args:
-        WORKER: style_comic
     profiles:
-      - gpu
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - workers
+      - all
     environment:
+      - MODEL_NAME=style_comic
+      - TRITON_URL=triton:8001
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
       - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
       - PUBSUB_EMULATOR_HOST=pubsub:8085
       - FIRESTORE_EMULATOR_HOST=firestore:8080
-      - DEVICE=cuda
-    volumes:
-      - models:/models
+      - STORAGE_EMULATOR_HOST=http://minio:9000
+      - PUBSUB_SUBSCRIPTION_COMIC=comic-sub
+      # OpenTelemetry
+      - OTEL_ENABLED=true
+      - OTEL_SERVICE_NAME=imagen-worker-comic
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_CONSOLE=false
     depends_on:
       - redis
       - pubsub
+      - triton
 
   style-aged-worker:
     build:
       context: ..
       dockerfile: docker/Dockerfile.worker
-      args:
-        WORKER: style_aged
     profiles:
-      - gpu
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - workers
+      - all
     environment:
+      - MODEL_NAME=style_aged
+      - TRITON_URL=triton:8001
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
       - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
       - PUBSUB_EMULATOR_HOST=pubsub:8085
       - FIRESTORE_EMULATOR_HOST=firestore:8080
-      - DEVICE=cuda
-    volumes:
-      - models:/models
+      - STORAGE_EMULATOR_HOST=http://minio:9000
+      - PUBSUB_SUBSCRIPTION_AGED=aged-sub
+      # OpenTelemetry
+      - OTEL_ENABLED=true
+      - OTEL_SERVICE_NAME=imagen-worker-aged
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_CONSOLE=false
     depends_on:
       - redis
       - pubsub
+      - triton
 
   background-remove-worker:
     build:
       context: ..
       dockerfile: docker/Dockerfile.worker
-      args:
-        WORKER: background_remove
     profiles:
-      - gpu
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - workers
+      - all
     environment:
+      - MODEL_NAME=background_remove
+      - TRITON_URL=triton:8001
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
       - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
       - PUBSUB_EMULATOR_HOST=pubsub:8085
       - FIRESTORE_EMULATOR_HOST=firestore:8080
-      - DEVICE=cuda
-    volumes:
-      - models:/models
+      - STORAGE_EMULATOR_HOST=http://minio:9000
+      - PUBSUB_SUBSCRIPTION_BACKGROUND_REMOVE=background-remove-sub
+      # OpenTelemetry
+      - OTEL_ENABLED=true
+      - OTEL_SERVICE_NAME=imagen-worker-background-remove
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_CONSOLE=false
     depends_on:
       - redis
       - pubsub
-
-  # ===========================================================================
-  # CPU WORKERS (for testing without GPU)
-  # ===========================================================================
-  upscale-worker-cpu:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.worker
-      args:
-        WORKER: upscale
-    profiles:
-      - cpu
-    environment:
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-local-dev}
-      - GCS_BUCKET=${GCS_BUCKET:-local-bucket}
-      - PUBSUB_EMULATOR_HOST=pubsub:8085
-      - FIRESTORE_EMULATOR_HOST=firestore:8080
-      - DEVICE=cpu
-    volumes:
-      - models:/models
-    depends_on:
-      - redis
-      - pubsub
+      - triton
 
   # ===========================================================================
   # INFRASTRUCTURE (Local Emulators)
