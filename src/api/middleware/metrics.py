@@ -2,11 +2,14 @@
 # METRICS MODULE (Prometheus)
 # =============================================================================
 #
-# Exposes Prometheus metrics for:
+# Exposes Prometheus metrics for the API layer:
 #   - Request counts by endpoint, method, status
 #   - Request latency histograms
 #   - Active requests gauge
-#   - Business metrics (jobs created, processed, etc.)
+#   - Business metrics (jobs created, file uploads)
+#
+# NOTE: Job completion metrics are tracked by workers, not the API.
+#       See src/workers/triton_worker.py for worker metrics.
 #
 # Endpoint: GET /metrics
 #
@@ -68,34 +71,15 @@ REQUESTS_IN_PROGRESS = Gauge(
 # Error metrics
 ERROR_COUNT = Counter(
     "imagen_errors_total",
-    "Total errors",
+    "Total errors by type and endpoint",
     ["type", "endpoint"],
 )
 
-# Business metrics
+# Business metrics - API layer only tracks job creation
 JOBS_CREATED = Counter(
     "imagen_jobs_created_total",
-    "Total jobs created",
+    "Total jobs created (submitted to queue)",
     ["job_type"],
-)
-
-JOBS_COMPLETED = Counter(
-    "imagen_jobs_completed_total",
-    "Total jobs completed",
-    ["job_type", "status"],
-)
-
-JOB_PROCESSING_TIME = Histogram(
-    "imagen_job_processing_seconds",
-    "Job processing time in seconds",
-    ["job_type"],
-    buckets=(1, 5, 10, 30, 60, 120, 300, 600),
-)
-
-QUEUE_DEPTH = Gauge(
-    "imagen_queue_depth",
-    "Current queue depth",
-    ["queue_name"],
 )
 
 # File metrics
@@ -213,28 +197,22 @@ async def metrics_endpoint(request: Request) -> Response:
 
 
 class MetricsRecorder:
-    """Helper class to record business metrics."""
+    """
+    Helper class to record business metrics in the API layer.
+
+    NOTE: Job completion and SLO metrics are tracked by workers.
+    This class only handles API-layer metrics like job creation and uploads.
+    """
 
     @staticmethod
     def job_created(job_type: str):
-        """Record job creation."""
+        """Record job creation (job submitted to queue)."""
         JOBS_CREATED.labels(job_type=job_type).inc()
 
     @staticmethod
-    def job_completed(job_type: str, status: str, duration: float):
-        """Record job completion."""
-        JOBS_COMPLETED.labels(job_type=job_type, status=status).inc()
-        JOB_PROCESSING_TIME.labels(job_type=job_type).observe(duration)
-
-    @staticmethod
     def file_uploaded(job_type: str, size_bytes: int):
-        """Record file upload."""
+        """Record file upload size."""
         FILE_SIZE_BYTES.labels(job_type=job_type).observe(size_bytes)
-
-    @staticmethod
-    def set_queue_depth(queue_name: str, depth: int):
-        """Set current queue depth."""
-        QUEUE_DEPTH.labels(queue_name=queue_name).set(depth)
 
     @staticmethod
     def record_error(error_type: str, endpoint: str):
