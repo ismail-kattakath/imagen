@@ -2,7 +2,9 @@
 # CUSTOM TRITON INFERENCE SERVER IMAGE
 # =============================================================================
 #
-# Based on NGC Triton with added Python dependencies for our models.
+# Based on NGC Triton with:
+# - Python dependencies for our model backends
+# - Pre-configured model repository
 #
 # Build:
 #   docker build -t triton-imagen -f triton/Dockerfile .
@@ -29,8 +31,11 @@ RUN pip install --no-cache-dir \
     opencv-python-headless \
     scikit-image
 
-# Create model directory
-RUN mkdir -p /models/huggingface
+# Create directories
+RUN mkdir -p /models/huggingface /models/repository
+
+# Copy model repository (config.pbtxt + model.py files)
+COPY triton/model_repository/ /models/repository/
 
 # Set environment variables
 ENV HF_HOME=/models/huggingface
@@ -41,5 +46,5 @@ ENV TORCH_HOME=/models/torch
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:8000/v2/health/ready || exit 1
 
-# Default command
-CMD ["tritonserver", "--model-repository=/models/repository"]
+# Default command - use /models/repository for model configs
+CMD ["tritonserver", "--model-repository=/models/repository", "--log-verbose=1"]

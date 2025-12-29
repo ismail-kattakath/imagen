@@ -1,4 +1,12 @@
-# Workers kustomization
+# =============================================================================
+# WORKERS KUSTOMIZATION
+# =============================================================================
+#
+# CPU-only workers that call Triton Inference Server via gRPC.
+# No GPU required - all ML inference happens in Triton.
+#
+# =============================================================================
+
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

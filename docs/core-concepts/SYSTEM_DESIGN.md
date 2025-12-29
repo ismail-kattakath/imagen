@@ -7,15 +7,16 @@ Comprehensive architecture documentation for the AI-powered image processing pla
 ## Table of Contents
 
 1. [High-Level Overview](#high-level-overview)
-2. [Request Flow](#request-flow)
-3. [Project Structure](#project-structure)
-4. [API Endpoints](#api-endpoints)
-5. [GCP Services Used](#gcp-services-used)
-6. [Kubernetes Resources](#kubernetes-resources)
-7. [Auto-Scaling](#auto-scaling)
-8. [Model Management](#model-management)
-9. [Key Design Decisions](#key-design-decisions)
-10. [Cost Estimates](#cost-estimates)
+2. [Triton Architecture](#triton-architecture)
+3. [Request Flow](#request-flow)
+4. [Project Structure](#project-structure)
+5. [API Endpoints](#api-endpoints)
+6. [GCP Services Used](#gcp-services-used)
+7. [Kubernetes Resources](#kubernetes-resources)
+8. [Auto-Scaling](#auto-scaling)
+9. [Model Management](#model-management)
+10. [Key Design Decisions](#key-design-decisions)
+11. [Cost Estimates](#cost-estimates)
 
 ---
 
@@ -52,35 +53,38 @@ Comprehensive architecture documentation for the AI-powered image processing pla
 ┌───────▼─────────────────────────────────────────────────────────┐
 │                        GKE Autopilot                            │
 │                                                                 │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐ │
-│  │ Upscale  │ │ Enhance  │ │  Comic   │ │ BG Remove│ │  Aged  │ │
-│  │ Worker   │ │ Worker   │ │  Worker  │ │  Worker  │ │ Worker │ │
-│  │ (T4 GPU) │ │ (T4 GPU) │ │ (T4 GPU) │ │ (T4 GPU) │ │(T4 GPU)│ │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └───┬────┘ │
-│       │            │            │            │           │      │
-│       └────────────┴────────────┼────────────┴───────────┘      │
-│                                 │                               │
-│  ┌──────────────────────────────▼───────────────────────────┐   │
-│  │                    PVC (50Gi)                            │   │
-│  │              Shared Model Storage                        │   │
-│  │    ┌─────────────────────────────────────────────────┐   │   │
-│  │    │ /models/huggingface/hub/                        │   │   │
-│  │    │   ├── stabilityai--sd-x4-upscaler    (~2.5GB)   │   │   │
-│  │    │   ├── stabilityai--sdxl-refiner      (~6GB)     │   │   │
-│  │    │   ├── nitrosocke--Ghibli-Diffusion   (~4GB)     │   │   │
-│  │    │   ├── stabilityai--sd-2-1            (~5GB)     │   │   │
-│  │    │   └── briaai--RMBG-1.4               (~1GB)     │   │   │
-│  │    └─────────────────────────────────────────────────┘   │   │
-│  └──────────────────────────────────────────────────────────┘   │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │              THIN WORKERS (CPU-only, no GPU)               │ │
+│  │                                                            │ │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │ │
+│  │  │ Upscale  │ │ Enhance  │ │  Comic   │ │ BG Remove│ ...  │ │
+│  │  │ Worker   │ │ Worker   │ │  Worker  │ │  Worker  │      │ │
+│  │  │ (CPU)    │ │ (CPU)    │ │ (CPU)    │ │ (CPU)    │      │ │
+│  │  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘      │ │
+│  │       │            │            │            │             │ │
+│  │       └────────────┴─────┬──────┴────────────┘             │ │
+│  │                          │ gRPC                            │ │
+│  │                          ▼                                 │ │
+│  │  ┌──────────────────────────────────────────────────────┐  │ │
+│  │  │           TRITON INFERENCE SERVER (T4 GPU)           │  │ │
+│  │  │                                                      │  │ │
+│  │  │  ┌─────────────────────────────────────────────────┐ │  │ │
+│  │  │  │              Dynamic Batcher                    │ │  │ │
+│  │  │  │         (batches 2-4 requests)                  │ │  │ │
+│  │  │  └──────────────────────┬──────────────────────────┘ │  │ │
+│  │  │                         │                            │  │ │
+│  │  │    ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐     │  │ │
+│  │  │    │upscale│ │enhance│ │comic │ │ aged │ │rmbg  │     │  │ │
+│  │  │    │model │ │model │ │model │ │model │ │model │     │  │ │
+│  │  │    └──────┘ └──────┘ └──────┘ └──────┘ └──────┘     │  │ │
+│  │  │                                                      │  │ │
+│  │  └──────────────────────────────────────────────────────┘  │ │
+│  │                                                            │ │
+│  └────────────────────────────────────────────────────────────┘ │
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    Auto-Scaling (HPA)                    │   │
-│  │                                                          │   │
-│  │   Metrics ──▶ HPA ──▶ Deployment ──▶ GKE provisions      │   │
-│  │   Adapter       │      replicas       GPU nodes          │   │
-│  │                 │                                        │   │
-│  │   Queue depth > 2 msgs/worker? Scale up (max 10)         │   │
-│  │   Queue empty for 5 min? Scale down (min 1)              │   │
+│  │                    PVC (50Gi)                            │   │
+│  │              Shared Model Storage                        │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
@@ -94,9 +98,82 @@ Comprehensive architecture documentation for the AI-powered image processing pla
 | Job Queue | Cloud Pub/Sub | Decouples API from workers |
 | Job State | Firestore | Tracks job status |
 | Image Storage | Cloud Storage (GCS) | Stores input/output images |
-| GPU Workers | GKE + T4 GPUs | Runs ML pipelines |
-| Model Storage | Persistent Volume | Shared model cache |
-| Auto-Scaling | HPA + Metrics Adapter | Scales workers based on queue |
+| Thin Workers | GKE (CPU-only pods) | Downloads images, calls Triton, uploads results |
+| Triton Server | NVIDIA Triton + T4 GPU | Centralized ML inference with dynamic batching |
+| Model Storage | Persistent Volume | Shared model cache for Triton |
+| Auto-Scaling | HPA + Metrics Adapter | Scales workers and Triton based on load |
+
+---
+
+## Triton Architecture
+
+### Why Triton?
+
+The previous architecture had **5 separate GPU workers**, each requiring its own T4 GPU:
+
+| Problem | Impact |
+|---------|--------|
+| 5× T4 GPUs minimum | ~$365/month (Spot) or ~$1,260/month (On-demand) |
+| No batching | 1 image at a time per GPU |
+| Model loading per worker | Slow cold starts, wasted memory |
+| Independent scaling | Over-provisioned GPUs for bursty traffic |
+
+### Triton Solution
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         TRITON BENEFITS                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+OLD: 5 GPU Workers (1 GPU each)          NEW: Triton + Thin Workers
+─────────────────────────────            ─────────────────────────────
+
+┌─────────┐ ┌─────────┐ ┌─────────┐      ┌────────────────────────────┐
+│Worker 1 │ │Worker 2 │ │Worker 3 │      │    Thin Workers (CPU)      │
+│ T4 GPU  │ │ T4 GPU  │ │ T4 GPU  │      │  • No GPU required         │
+│ upscale │ │ enhance │ │  comic  │      │  • Cheap to scale (20+)    │
+└─────────┘ └─────────┘ └─────────┘      │  • Fast startup (<10s)     │
+                                         └──────────────┬─────────────┘
+┌─────────┐ ┌─────────┐                                │ gRPC
+│Worker 4 │ │Worker 5 │                                ▼
+│ T4 GPU  │ │ T4 GPU  │                  ┌────────────────────────────┐
+│  aged   │ │  rmbg   │                  │   Triton Server (1-3 GPU)  │
+└─────────┘ └─────────┘                  │  • Dynamic batching (2-4x) │
+                                         │  • Multi-model on 1 GPU    │
+Cost: 5 GPUs = $365+/mo                  │  • Built-in metrics        │
+Throughput: ~0.07 jobs/s/GPU             └────────────────────────────┘
+                                         
+                                         Cost: 1-3 GPUs = $100-250/mo
+                                         Throughput: ~0.3 jobs/s/GPU
+```
+
+### Thin Worker Pattern
+
+Workers are now **CPU-only** and act as orchestrators:
+
+```python
+class TritonUpscaleWorker(TritonWorker):
+    model_name = "upscale"
+    subscription_name = "upscale-jobs-sub"
+    
+    def process_with_triton(self, image, params: dict):
+        # No local model - just call Triton via gRPC
+        return self.triton.upscale(image, scale=params.get("scale", 4.0))
+```
+
+**Worker responsibilities:**
+1. Pull message from Pub/Sub
+2. Download image from GCS
+3. Send gRPC request to Triton
+4. Upload result to GCS
+5. Update job status in Firestore
+
+**Triton responsibilities:**
+1. Load all 5 models into GPU memory
+2. Queue incoming requests
+3. Batch requests (2-4 images)
+4. Run inference
+5. Return results
 
 ---
 
@@ -124,56 +201,45 @@ Comprehensive architecture documentation for the AI-powered image processing pla
    │
    │  Returns immediately: {"job_id": "abc-123", "status": "queued"}
    ▼
-3. CLIENT RECEIVES RESPONSE (~1-2 seconds)
-   │
-   │  Client now polls for status
-   ▼
-4. GPU WORKER PULLS MESSAGE (GKE)
+3. THIN WORKER PULLS MESSAGE (GKE - CPU only)
    │
    ├──▶ Receives message from upscale-jobs-sub
    ├──▶ Updates Firestore: {status: "processing"}
    ├──▶ Downloads image from GCS
-   ├──▶ Loads ML model (if not cached)
-   ├──▶ Runs inference (5-30 seconds)
+   ├──▶ Sends gRPC request to Triton ──────────────────┐
+   │                                                    │
+   │    ┌───────────────────────────────────────────────▼───────┐
+   │    │ TRITON INFERENCE SERVER                               │
+   │    │                                                       │
+   │    │  1. Request queued in dynamic batcher                 │
+   │    │  2. Batched with other requests (2-4 images)          │
+   │    │  3. GPU inference runs on batch                       │
+   │    │  4. Results returned via gRPC                         │
+   │    └───────────────────────────────────────────────────────┘
+   │                                                    │
+   ├──▶ Receives result from Triton ◄──────────────────┘
    ├──▶ Uploads result to GCS: outputs/{job_id}/result.png
    ├──▶ Updates Firestore: {status: "completed", output_path: ...}
    └──▶ ACKs message (removes from queue)
    │
    ▼
-5. CLIENT POLLS STATUS
+4. CLIENT POLLS STATUS
    │
    │  GET /api/v1/jobs/{job_id}
    │
-   ├──▶ If status == "queued": keep polling
-   ├──▶ If status == "processing": keep polling
    ├──▶ If status == "completed": returns signed URL
-   └──▶ If status == "failed": returns error message
-   │
-   ▼
-6. CLIENT DOWNLOADS RESULT
-   │
-   │  GET {signed_url}  (direct GCS download)
-   │
-   ▼
-   Done!
+   └──▶ Client downloads result from GCS
 ```
 
-### Timeline Example
+### Timeline Comparison
 
-```
-Time    Event                                   Status
-─────────────────────────────────────────────────────────────
-0s      Client uploads image                    -
-1s      API responds with job_id                queued
-1s      Message published to Pub/Sub            queued
-2s      Worker picks up message                 processing
-2s      Worker downloads image                  processing
-3s      Worker runs ML pipeline                 processing
-25s     Worker uploads result                   processing
-26s     Worker updates Firestore                completed
-27s     Client polls, gets signed URL           completed
-28s     Client downloads result                 -
-```
+| Stage | Old (GPU Worker) | New (Triton) |
+|-------|------------------|--------------|
+| Worker startup | 60-120s (model load) | 5-10s (no model) |
+| Image download | 1s | 1s |
+| Inference | 5-30s | 3-20s (batched) |
+| Image upload | 1s | 1s |
+| **Total** | **67-152s** | **10-32s** |
 
 ---
 
@@ -184,96 +250,59 @@ imagen/
 ├── src/
 │   ├── api/                        # FastAPI Application
 │   │   ├── main.py                 # App entrypoint, middleware
-│   │   ├── routes/
-│   │   │   ├── health.py           # GET /health, /ready
-│   │   │   ├── images.py           # POST /images/* endpoints
-│   │   │   └── jobs.py             # GET /jobs/{id}
-│   │   └── schemas/
-│   │       ├── images.py           # Request params (UpscaleParams, etc.)
-│   │       └── jobs.py             # Response models (JobResponse, etc.)
+│   │   ├── routes/                 # API endpoints
+│   │   ├── middleware/             # Auth, rate limiting, metrics
+│   │   └── schemas/                # Request/response models
 │   │
-│   ├── pipelines/                  # ML Pipelines (Diffusers)
-│   │   ├── base.py                 # BasePipeline abstract class
-│   │   ├── upscale.py              # 4x upscaling (SD Upscaler)
-│   │   ├── enhance.py              # Quality enhancement (SDXL Refiner)
-│   │   ├── style_comic.py          # Comic style (Ghibli Diffusion)
-│   │   ├── style_aged.py           # Vintage look (SD 2.1)
-│   │   └── background_remove.py    # BG removal (RMBG-1.4)
+│   ├── pipelines/                  # ML Pipelines (legacy, for local dev)
+│   │   ├── base.py
+│   │   ├── upscale.py
+│   │   └── ...
 │   │
 │   ├── workers/                    # Pub/Sub Consumers
-│   │   ├── base.py                 # BaseWorker with common logic
-│   │   ├── upscale.py              # Upscale worker
-│   │   ├── enhance.py              # Enhance worker
-│   │   ├── style_comic.py          # Comic style worker
-│   │   └── background_remove.py    # Background removal worker
+│   │   ├── base.py                 # Legacy GPU worker base
+│   │   ├── triton_worker.py        # ⭐ Thin worker base + all workers
+│   │   └── ...
 │   │
-│   ├── services/                   # GCP Service Integrations
-│   │   ├── storage.py              # GCS: upload, download, signed URLs
-│   │   ├── queue.py                # Pub/Sub: publish, subscribe
-│   │   └── jobs.py                 # Firestore: job CRUD operations
+│   ├── services/
+│   │   ├── storage.py              # GCS operations
+│   │   ├── queue.py                # Pub/Sub operations
+│   │   ├── jobs.py                 # Firestore operations
+│   │   └── triton/                 # ⭐ Triton client
+│   │       ├── __init__.py
+│   │       └── client.py           # gRPC client for Triton
 │   │
-│   ├── core/                       # Configuration & Utilities
-│   │   ├── config.py               # Settings from environment
-│   │   ├── logging.py              # Structured logging
-│   │   └── exceptions.py           # Custom exceptions
-│   │
-│   └── utils/
-│       └── image.py                # Image helpers (resize, convert)
+│   └── core/                       # Configuration & Utilities
 │
-├── docker/
-│   ├── Dockerfile.api              # API container (slim Python)
-│   ├── Dockerfile.worker           # Worker container (PyTorch + CUDA)
-│   └── docker-compose.yml          # Local development setup
+├── triton/                         # ⭐ Triton Inference Server
+│   ├── Dockerfile                  # Custom Triton image
+│   ├── README.md
+│   └── model_repository/           # Model configs + Python backends
+│       ├── upscale/
+│       │   ├── config.pbtxt
+│       │   └── 1/model.py
+│       ├── enhance/
+│       ├── background_remove/
+│       ├── style_comic/
+│       └── style_aged/
 │
 ├── k8s/
-│   ├── base/                       # Foundation resources
-│   │   ├── namespace.yaml          # 'imagen' namespace
-│   │   ├── configmap.yaml          # Environment variables
-│   │   ├── pvc.yaml                # 50Gi model storage
-│   │   └── workload-identity.yaml  # GCP IAM binding
-│   │
-│   ├── workers/                    # Worker deployments
-│   │   ├── upscale-worker.yaml
-│   │   ├── enhance-worker.yaml
-│   │   ├── comic-worker.yaml
-│   │   └── background-remove-worker.yaml
-│   │
-│   └── autoscaling/                # Auto-scaling configuration
-│       ├── custom-metrics-adapter.yaml  # Reads Pub/Sub metrics
-│       ├── upscale-hpa.yaml        # HPA for upscale worker
-│       ├── enhance-hpa.yaml        # HPA for enhance worker
-│       ├── comic-hpa.yaml          # HPA for comic worker
-│       ├── style-aged-hpa.yaml     # HPA for aged style worker
-│       ├── background-remove-hpa.yaml # HPA for background remove worker
-│       └── README.md               # Auto-scaling documentation
+│   ├── base/                       # Namespace, ConfigMap, PVC
+│   ├── triton/                     # ⭐ Triton deployment + service + HPA
+│   ├── workers/       # Workers (CPU-only, calls Triton)
+│   ├── autoscaling/                # HPAs for workers
+│   ├── monitoring/                 # PodMonitoring for GMP
+│   └── overlays/
+│       ├── dev/
+│       └── prod/
 │
 ├── terraform/                      # Infrastructure as Code
-│   ├── main.tf                     # All GCP resources
-│   ├── variables.tf                # Input variables
-│   ├── outputs.tf                  # Output values
-│   ├── modules/
-│   │   └── autoscaling/            # Metrics adapter IAM
-│   └── environments/
-│       ├── dev.tfvars              # Development config
-│       └── prod.tfvars             # Production config
-│
-├── tests/
-│   ├── unit/                       # Unit tests
-│   └── integration/                # Integration tests
-│
-├── models/                         # Model cache (git-ignored)
-│
-└── Documentation
-    ├── README.md                   # Project overview
-    ├── ARCHITECTURE.md             # This file
-    ├── INFRASTRUCTURE_GUIDE.md     # Terraform & K8s explained
-    ├── MODEL_MANAGEMENT.md         # Model loading & caching
-    ├── DEPLOYMENT_GUIDE.md         # Production deployment
-    ├── QUICK_REFERENCE.md          # Command cheat sheet
-    └── CHANGELOG.md                # Project history
+├── docker/                         # Dockerfiles
+└── docs/                           # Documentation
 ```
 
 ---
+
 
 ## API Endpoints
 
@@ -293,129 +322,19 @@ imagen/
 |--------|----------|-------------|----------|
 | `GET` | `/api/v1/jobs/{job_id}` | Get job status | Status, output URL |
 
-### Health Checks
-
-| Method | Endpoint | Description | Used By |
-|--------|----------|-------------|---------|
-| `GET` | `/health` | Liveness check | Load balancer |
-| `GET` | `/ready` | Readiness check | Kubernetes |
-
-### Example Request/Response
-
-```bash
-# Submit upscale job
-curl -X POST "https://api.example.com/api/v1/images/upscale" \
-  -F "file=@photo.jpg" \
-  -F "prompt=high quality, detailed"
-
-# Response
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "queued",
-  "message": "Job queued successfully"
-}
-
-# Check status
-curl "https://api.example.com/api/v1/jobs/550e8400-e29b-41d4-a716-446655440000"
-
-# Response (completed)
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "type": "upscale",
-  "status": "completed",
-  "output_url": "https://storage.googleapis.com/...",
-  "created_at": "2024-01-15T10:30:00Z",
-  "updated_at": "2024-01-15T10:30:25Z"
-}
-```
-
 ---
 
 ## GCP Services Used
 
-### Service Map
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        GCP Project                               │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                    Compute                               │    │
-│  │                                                          │    │
-│  │   ┌─────────────┐          ┌─────────────────────────┐  │    │
-│  │   │ Cloud Run   │          │     GKE Autopilot       │  │    │
-│  │   │ (API)       │          │     (GPU Workers)       │  │    │
-│  │   │             │          │                         │  │    │
-│  │   │ - Serverless│          │ - T4 GPUs              │  │    │
-│  │   │ - Auto-scale│          │ - Auto-provisions nodes│  │    │
-│  │   │ - $0 at idle│          │ - Spot instances       │  │    │
-│  │   └─────────────┘          └─────────────────────────┘  │    │
-│  │                                                          │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                    Messaging                             │    │
-│  │                                                          │    │
-│  │   ┌─────────────────────────────────────────────────┐   │    │
-│  │   │                 Cloud Pub/Sub                    │   │    │
-│  │   │                                                  │   │    │
-│  │   │  Topics:              Subscriptions:             │   │    │
-│  │   │  - upscale-jobs       - upscale-jobs-sub        │   │    │
-│  │   │  - enhance-jobs       - enhance-jobs-sub        │   │    │
-│  │   │  - style-comic-jobs   - style-comic-jobs-sub    │   │    │
-│  │   │  - style-aged-jobs    - style-aged-jobs-sub     │   │    │
-│  │   │  - background-remove  - background-remove-sub   │   │    │
-│  │   │                                                  │   │    │
-│  │   └─────────────────────────────────────────────────┘   │    │
-│  │                                                          │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                    Storage                               │    │
-│  │                                                          │    │
-│  │   ┌─────────────────┐    ┌─────────────────────────┐    │    │
-│  │   │ Cloud Storage   │    │     Firestore           │    │    │
-│  │   │ (GCS)           │    │                         │    │    │
-│  │   │                 │    │  Collection: jobs       │    │    │
-│  │   │ /inputs/{id}/   │    │  - job_id               │    │    │
-│  │   │ /outputs/{id}/  │    │  - status               │    │    │
-│  │   │                 │    │  - input_path           │    │    │
-│  │   │ Auto-delete: 7d │    │  - output_path          │    │    │
-│  │   └─────────────────┘    │  - created_at           │    │    │
-│  │                          └─────────────────────────┘    │    │
-│  │                                                          │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                    Security & DevOps                     │    │
-│  │                                                          │    │
-│  │   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │    │
-│  │   │     IAM     │  │  Artifact   │  │   Cloud     │     │    │
-│  │   │             │  │  Registry   │  │   Build     │     │    │
-│  │   │ Service     │  │             │  │             │     │    │
-│  │   │ Accounts:   │  │ Docker      │  │ CI/CD       │     │    │
-│  │   │ - worker    │  │ images      │  │ pipeline    │     │    │
-│  │   │ - metrics   │  │             │  │             │     │    │
-│  │   └─────────────┘  └─────────────┘  └─────────────┘     │    │
-│  │                                                          │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Service Details
-
 | Service | Purpose | Configuration |
 |---------|---------|---------------|
 | **Cloud Run** | API hosting | Auto-scales 0→10, 512MB memory |
-| **GKE Autopilot** | GPU workers | T4 GPUs, auto-provisions nodes |
+| **GKE Autopilot** | Triton + Workers | T4 GPUs for Triton, CPU for workers |
 | **Cloud Pub/Sub** | Job queue | 5 topics, 10 min ACK deadline |
 | **Cloud Storage** | Image storage | Regional, 7-day lifecycle |
 | **Firestore** | Job state | Native mode, auto-scaling |
-| **Artifact Registry** | Docker images | Stores API & worker images |
-| **IAM** | Security | Service accounts with minimal perms |
+| **Artifact Registry** | Docker images | API, Worker, Triton images |
 | **Cloud Build** | CI/CD | Builds & deploys on push |
-| **Cloud Monitoring** | Metrics | HPA reads queue depth |
 
 ---
 
@@ -429,62 +348,39 @@ curl "https://api.example.com/api/v1/jobs/550e8400-e29b-41d4-a716-446655440000"
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐ │
 │  │ ConfigMap: imagen-config                                   │ │
-│  │ - GOOGLE_CLOUD_PROJECT                                     │ │
-│  │ - GCS_BUCKET                                               │ │
-│  │ - DEVICE                                                   │ │
+│  │ - GOOGLE_CLOUD_PROJECT, GCS_BUCKET, TRITON_URL             │ │
 │  └────────────────────────────────────────────────────────────┘ │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐ │
-│  │ PVC: models-pvc (50Gi)                                     │ │
-│  │ - Shared model storage                                     │ │
-│  │ - ReadWriteOnce (or ReadWriteMany with Filestore)         │ │
+│  │ Triton Inference Server (GPU)                              │ │
+│  │                                                             │ │
+│  │  Deployment: triton-inference-server                        │ │
+│  │  - replicas: 1-3 (HPA)                                     │ │
+│  │  - GPU: nvidia-tesla-t4                                     │ │
+│  │  - Memory: 24Gi                                             │ │
+│  │  - Ports: 8000 (HTTP), 8001 (gRPC), 8002 (metrics)         │ │
+│  │                                                             │ │
+│  │  Service: triton (ClusterIP)                                │ │
+│  │  HPA: triton-hpa (scales on queue latency)                  │ │
 │  └────────────────────────────────────────────────────────────┘ │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐ │
-│  │ Deployments                                                 │ │
+│  │ Thin Workers (CPU-only)                                     │ │
 │  │                                                             │ │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │ │
-│  │  │upscale-worker│  │enhance-worker│  │comic-worker  │      │ │
+│  │  │upscale-worker│  │enhance-worker│  │comic-worker  │ ...  │ │
 │  │  │              │  │              │  │              │      │ │
-│  │  │replicas: 1-10│  │replicas: 1-10│  │replicas: 1-10│      │ │
-│  │  │GPU: T4       │  │GPU: T4       │  │GPU: T4       │      │ │
-│  │  │Mem: 16Gi     │  │Mem: 16Gi     │  │Mem: 16Gi     │      │ │
+│  │  │replicas: 0-20│  │replicas: 0-20│  │replicas: 0-20│      │ │
+│  │  │CPU: 250m-1   │  │CPU: 250m-1   │  │CPU: 250m-1   │      │ │
+│  │  │Mem: 512Mi-2Gi│  │Mem: 512Mi-2Gi│  │Mem: 512Mi-2Gi│      │ │
+│  │  │NO GPU        │  │NO GPU        │  │NO GPU        │      │ │
 │  │  └──────────────┘  └──────────────┘  └──────────────┘      │ │
 │  │                                                             │ │
-│  │  ┌──────────────┐  ┌──────────────┐                        │ │
-│  │  │aged-worker   │  │bg-remove-    │                        │ │
-│  │  │              │  │worker        │                        │ │
-│  │  │replicas: 1-10│  │              │                        │ │
-│  │  │GPU: T4       │  │replicas: 1-10│                        │ │
-│  │  │Mem: 16Gi     │  └──────────────┘                        │ │
-│  │  └──────────────┘                                          │ │
-│  │                                                             │ │
+│  │  HPAs scale based on Pub/Sub queue depth                    │ │
 │  └────────────────────────────────────────────────────────────┘ │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐ │
-│  │ HorizontalPodAutoscalers                                   │ │
-│  │                                                             │ │
-│  │  ┌─────────────────┐  ┌─────────────────┐                  │ │
-│  │  │upscale-hpa      │  │enhance-hpa      │  ...             │ │
-│  │  │                 │  │                 │                  │ │
-│  │  │min: 1, max: 10  │  │min: 1, max: 10  │                  │ │
-│  │  │metric: queue    │  │metric: queue    │                  │ │
-│  │  │target: 2/worker │  │target: 2/worker │                  │ │
-│  │  └─────────────────┘  └─────────────────┘                  │ │
-│  │                                                             │ │
-│  └────────────────────────────────────────────────────────────┘ │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│                 Namespace: custom-metrics                        │
-│                                                                  │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │ Deployment: custom-metrics-stackdriver-adapter             │ │
-│  │                                                             │ │
-│  │ Reads Pub/Sub metrics from Cloud Monitoring                │ │
-│  │ Exposes them to HPA via External Metrics API               │ │
-│  │                                                             │ │
+│  │ PVC: models-pvc (50Gi) - Mounted by Triton only            │ │
 │  └────────────────────────────────────────────────────────────┘ │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
@@ -494,71 +390,43 @@ curl "https://api.example.com/api/v1/jobs/550e8400-e29b-41d4-a716-446655440000"
 
 ## Auto-Scaling
 
-### How It Works
+### Two-Tier Scaling
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      AUTO-SCALING CHAIN                          │
+│                      AUTO-SCALING STRATEGY                       │
 └─────────────────────────────────────────────────────────────────┘
 
-Step 1: Queue fills up
-        │
-        │  100 messages in upscale-jobs-sub
-        ▼
-Step 2: Metrics Adapter reads Cloud Monitoring
-        │
-        │  pubsub.googleapis.com/subscription/num_undelivered_messages
-        ▼
-Step 3: HPA calculates desired replicas
-        │
-        │  100 messages / 2 per worker = 50 desired
-        │  max is 10, so target = 10
-        ▼
-Step 4: HPA updates Deployment
-        │
-        │  replicas: 1 → 10
-        ▼
-Step 5: GKE Autopilot provisions nodes
-        │
-        │  "10 pods need T4 GPUs, creating 10 nodes"
-        ▼
-Step 6: Workers start processing
-        │
-        │  Queue drains 10x faster
-        ▼
-Step 7: Queue empties, scale down
-        │
-        │  After 5 min idle: replicas: 10 → 1
-        │
-        Done!
+TIER 1: Thin Workers (fast, cheap)
+──────────────────────────────────
+Metric: Pub/Sub queue depth (undelivered messages)
+Target: 2 messages per worker
+Range: 0-20 replicas per worker type
+
+Queue fills up → Workers scale up → More gRPC calls to Triton
+
+
+TIER 2: Triton Server (slow, expensive)
+───────────────────────────────────────
+Metric: Triton inference queue latency
+Target: 100ms average queue delay
+Range: 1-3 replicas
+
+Triton queue backs up → Triton scales up → More GPU capacity
 ```
 
-### Scaling Parameters
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `minReplicas` | 1 | Always keep 1 worker running |
-| `maxReplicas` | 10 | Cost protection limit |
-| `averageValue` | 2 | Scale when >2 msgs per worker |
-| Scale up delay | 60s | Prevent flapping |
-| Scale down delay | 300s | Ensure traffic is truly gone |
-
-### Example Timeline
+### Scaling Timeline Example
 
 ```
-Time    Queue Depth    Workers    Action
-──────────────────────────────────────────────────
-0:00    0              1          Idle
-0:05    50             1          Traffic spike detected
-0:06    50             1→5        Scaling up
-0:08    50             5→10       Still scaling
-0:10    50             10         Max reached
-0:15    25             10         Draining queue
-0:20    0              10         Queue empty
-0:25    0              10         Waiting (5 min window)
-0:30    0              10→9       Scaling down
-0:35    0              9→5        Gradual reduction
-0:45    0              5→1        Back to minimum
+Time    Queue    Workers (5 types)    Triton    Action
+──────────────────────────────────────────────────────────────
+0:00    0        5 (1 each)           1         Idle
+0:05    100      5→25                 1         Traffic spike
+0:10    100      25→50                1→2       Workers saturating Triton
+0:15    50       50                   2         Draining
+0:20    0        50                   2         Queue empty
+0:25    0        50→25                2         Scale down workers
+0:35    0        25→5                 2→1       Back to baseline
 ```
 
 ---
@@ -567,144 +435,101 @@ Time    Queue Depth    Workers    Action
 
 ### Model Registry
 
-| Pipeline | Model | Size | Source |
-|----------|-------|------|--------|
-| Upscale | `stabilityai/stable-diffusion-x4-upscaler` | 2.5GB | HuggingFace |
-| Enhance | `stabilityai/stable-diffusion-xl-refiner-1.0` | 6GB | HuggingFace |
-| Comic | `nitrosocke/Ghibli-Diffusion` | 4GB | HuggingFace |
-| Aged | `stabilityai/stable-diffusion-2-1` | 5GB | HuggingFace |
-| BG Remove | `briaai/RMBG-1.4` | 1GB | HuggingFace |
+| Pipeline | Model | Size | Triton Backend |
+|----------|-------|------|----------------|
+| upscale | Real-ESRGAN | 2.5GB | Python |
+| enhance | SDXL Refiner | 6GB | Python |
+| comic | Ghibli-Diffusion | 4GB | Python |
+| aged | SD 2.1 | 5GB | Python |
+| background_remove | RMBG-1.4 | 1GB | Python |
 | **Total** | | **~18.5GB** | |
 
-### Storage Strategy
+### Triton Model Configuration
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    MODEL STORAGE STRATEGY                        │
-└─────────────────────────────────────────────────────────────────┘
+Each model has a `config.pbtxt`:
 
-LOCAL DEVELOPMENT:
-┌─────────────────────────────────────────────────────────────────┐
-│  ~/.cache/huggingface/                                          │
-│  └── hub/                                                       │
-│      └── models--stabilityai--...                              │
-│                                                                  │
-│  Models download automatically on first use                     │
-│  Cached locally for subsequent runs                             │
-└─────────────────────────────────────────────────────────────────┘
+```protobuf
+name: "upscale"
+backend: "python"
+max_batch_size: 4
 
-PRODUCTION (GKE):
-┌─────────────────────────────────────────────────────────────────┐
-│  PersistentVolumeClaim (50Gi)                                   │
-│  └── /models/huggingface/hub/                                  │
-│                                                                  │
-│  - First worker downloads models                                │
-│  - Stored on persistent disk                                    │
-│  - Shared across all workers                                    │
-│  - Survives pod restarts                                        │
-└─────────────────────────────────────────────────────────────────┘
+dynamic_batching {
+  preferred_batch_size: [2, 4]
+  max_queue_delay_microseconds: 100000  # 100ms
+}
+
+instance_group [{
+  count: 1
+  kind: KIND_GPU
+  gpus: [0]
+}]
 ```
 
 ---
 
 ## Key Design Decisions
 
-### 1. Async Processing
+### 1. Triton for Centralized Inference
 
-| Decision | Async with Pub/Sub |
-|----------|-------------------|
-| **Why** | GPU inference takes 5-30 seconds |
-| **Alternative** | Sync processing (would timeout) |
-| **Benefit** | API responds instantly, workers scale independently |
+| Decision | Triton Inference Server |
+|----------|------------------------|
+| **Why** | Consolidate 5 GPUs → 1-3 GPUs with batching |
+| **Alternative** | Keep separate GPU workers |
+| **Benefit** | 60-80% cost reduction, 4x throughput per GPU |
 
-### 2. Pub/Sub over Redis
+### 2. Thin Workers (CPU-only)
 
-| Decision | Cloud Pub/Sub |
-|----------|---------------|
-| **Why** | Managed, auto-scales, integrates with HPA |
-| **Alternative** | Redis + Celery |
-| **Benefit** | No infrastructure to manage, native GCP |
+| Decision | CPU-only job orchestrators |
+|----------|---------------------------|
+| **Why** | GPUs are expensive; workers just move data |
+| **Alternative** | GPU workers with local models |
+| **Benefit** | Scale to 20+ workers cheaply, fast startup |
 
-### 3. GKE Autopilot
+### 3. gRPC for Triton Communication
 
-| Decision | Autopilot (not Standard GKE) |
-|----------|----------------------------|
-| **Why** | Auto-provisions GPU nodes on demand |
-| **Alternative** | Standard GKE with node pools |
-| **Benefit** | Pay only when workers run, no node management |
+| Decision | gRPC over HTTP |
+|----------|----------------|
+| **Why** | Lower latency, efficient binary protocol |
+| **Alternative** | HTTP REST API |
+| **Benefit** | ~30% faster than HTTP for large payloads |
 
-### 4. Cloud Run for API
+### 4. Dynamic Batching
 
-| Decision | Cloud Run (not GKE) |
-|----------|---------------------|
-| **Why** | Scales to zero, cheap for API workload |
-| **Alternative** | API in GKE |
-| **Benefit** | $0 when idle, auto-scales instantly |
-
-### 5. Firestore for Job State
-
-| Decision | Firestore |
-|----------|-----------|
-| **Why** | Serverless, fast reads, auto-scales |
-| **Alternative** | Cloud SQL (Postgres) |
-| **Benefit** | No connection pooling, no DB management |
-
-### 6. PVC for Models
-
-| Decision | Shared Persistent Volume |
-|----------|-------------------------|
-| **Why** | Models are large (18GB), expensive to download |
-| **Alternative** | Bake into Docker image |
-| **Benefit** | Download once, share across workers |
-
-### 7. Separate Workers per Pipeline
-
-| Decision | One worker type per pipeline |
-|----------|----------------------------|
-| **Why** | Each model needs different GPU memory |
-| **Alternative** | Single worker with all models |
-| **Benefit** | Independent scaling, isolated failures |
-
-### 8. T4 Spot Instances
-
-| Decision | T4 GPUs with Spot VMs |
+| Decision | Triton dynamic batcher |
 |----------|----------------------|
-| **Why** | Best price/performance for inference |
-| **Alternative** | A100 or V100 |
-| **Benefit** | ~70% cost savings vs on-demand |
+| **Why** | Batch 2-4 images for GPU efficiency |
+| **Alternative** | Process 1 image at a time |
+| **Benefit** | 2-4x throughput improvement |
 
 ---
 
 ## Cost Estimates
 
-### Per-Component Costs
+### Old Architecture (5 GPU Workers)
 
-| Component | Specification | Cost/Month |
-|-----------|---------------|------------|
-| **Cloud Run (API)** | 1 vCPU, 512MB | ~$50 |
-| **GKE Workers (1 T4 Spot)** | 1 GPU, 16GB | ~$250 |
-| **GKE Workers (10 T4 Spot)** | 10 GPUs | ~$2,500 |
-| **Cloud Storage (100GB)** | Regional | ~$2 |
-| **Pub/Sub** | 1M messages | ~$10 |
-| **Firestore** | 100K reads/day | ~$5 |
-| **Artifact Registry** | 20GB | ~$5 |
+| Component | Specification | Cost/Month (Spot) |
+|-----------|---------------|-------------------|
+| 5× upscale/enhance/etc workers | 5× T4 GPU | ~$365 |
+| Cloud Run API | 1 vCPU | ~$50 |
+| Storage, Pub/Sub, Firestore | - | ~$20 |
+| **Total** | **5 T4 GPUs** | **~$435** |
 
-### Scenario Estimates
+### New Architecture (Triton + Thin Workers)
 
-| Scenario | Workers | Monthly Cost |
-|----------|---------|--------------|
-| **Development** | 0 (local) | ~$0 |
-| **Low Traffic** | 1 always | ~$320 |
-| **Medium Traffic** | 1-5 auto-scale | ~$500-1,000 |
-| **High Traffic** | 1-10 auto-scale | ~$1,000-2,600 |
+| Component | Specification | Cost/Month (Spot) |
+|-----------|---------------|-------------------|
+| Triton (1-3 replicas) | 1-3× T4 GPU | ~$73-219 |
+| 5× thin workers | CPU only | ~$25 |
+| Cloud Run API | 1 vCPU | ~$50 |
+| Storage, Pub/Sub, Firestore | - | ~$20 |
+| **Total** | **1-3 T4 GPUs** | **~$168-314** |
 
-### Cost Optimization Tips
+### Savings
 
-1. **Use Spot VMs** — 70% savings on GPU nodes
-2. **Scale to zero** — Set `minReplicas: 0` if cold start is acceptable
-3. **Right-size max replicas** — Don't over-provision
-4. **Set billing alerts** — Avoid surprise bills
-5. **Use lifecycle rules** — Auto-delete old images from GCS
+| Scenario | Old Cost | New Cost | Savings |
+|----------|----------|----------|---------|
+| Low traffic | $435/mo | $168/mo | **61%** |
+| High traffic | $2,600/mo | $600/mo | **77%** |
 
 ---
 
@@ -713,36 +538,37 @@ PRODUCTION (GKE):
 ### Deployment Commands
 
 ```bash
-# Infrastructure
-cd terraform && terraform apply -var-file=environments/dev.tfvars
+# Deploy with Kustomize
+kubectl apply -k k8s/overlays/dev   # Development
+kubectl apply -k k8s/overlays/prod  # Production
 
-# Connect to GKE
-gcloud container clusters get-credentials imagen-cluster --region us-central1
+# Check Triton status
+kubectl get pods -n imagen -l app=triton
+kubectl logs -f deployment/triton-inference-server -n imagen
 
-# Deploy all
-make k8s-deploy-all
+# Check thin workers
+kubectl get pods -n imagen -l app.kubernetes.io/component=worker
 
-# Check status
-kubectl get pods -n imagen
+# Check HPAs
 kubectl get hpa -n imagen
+
+# Port-forward Triton for testing
+kubectl port-forward -n imagen svc/triton 8000:8000 8001:8001 8002:8002
 ```
 
-### Useful Commands
+### Triton Health Checks
 
 ```bash
-# Watch scaling
-make k8s-watch
+# Server ready
+curl http://localhost:8000/v2/health/ready
 
-# View logs
-kubectl logs -f deployment/upscale-worker -n imagen
+# Model status
+curl http://localhost:8000/v2/models/upscale
 
-# Check queue depth
-gcloud pubsub subscriptions describe upscale-jobs-sub
-
-# Force scale
-kubectl scale deployment/upscale-worker --replicas=5 -n imagen
+# Metrics
+curl http://localhost:8002/metrics
 ```
 
 ---
 
-*Last updated: December 2024*
+*Architecture updated: December 2024 - Migrated to Triton Inference Server*

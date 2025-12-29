@@ -1,15 +1,18 @@
-# Triton Inference Server Kustomization
+# =============================================================================
+# TRITON INFERENCE SERVER KUSTOMIZATION
+# =============================================================================
+#
+# Deploys Triton Inference Server with all models.
+# Workers call Triton via gRPC for inference.
+#
+# =============================================================================
+
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 namespace: imagen
 
-labels:
-  - pairs:
-      app.kubernetes.io/managed-by: kustomize
-      app.kubernetes.io/part-of: imagen
-    includeSelectors: false
-
 resources:
   - deployment.yaml
   - pod-monitoring.yaml
+  - model-repository-configmap.yaml

@@ -1,3 +1,12 @@
+# =============================================================================
+# UPSCALE WORKER
+# =============================================================================
+#
+# CPU-only worker that calls Triton for inference.
+# No GPU required - all ML work happens in Triton.
+#
+# =============================================================================
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,57 +28,48 @@ spec:
         app.kubernetes.io/component: worker
         app.kubernetes.io/part-of: imagen
       annotations:
-        # Prometheus annotations (used by some scrapers)
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
         prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: imagen-worker
       
-      nodeSelector:
-        cloud.google.com/gke-accelerator: nvidia-tesla-t4
-      
-      tolerations:
-        - key: "nvidia.com/gpu"
-          operator: "Exists"
-          effect: "NoSchedule"
+      # NO GPU node selector - runs on standard CPU nodes
       
       containers:
         - name: worker
           image: us-central1-docker.pkg.dev/PROJECT_ID/imagen/worker:latest
-          args: ["-m", "src.workers.upscale"]
-          command: ["python"]
+          command: ["python", "-m", "src.workers.triton_worker"]
+          args: ["TritonUpscaleWorker"]
           
-          # Expose metrics port for GMP scraping
           ports:
             - name: metrics
               containerPort: 8080
               protocol: TCP
           
+          # CPU-only resources - much cheaper than GPU
           resources:
             limits:
-              nvidia.com/gpu: 1
-              memory: "16Gi"
+              memory: "2Gi"
+              cpu: "1"
             requests:
-              memory: "8Gi"
-              cpu: "2"
+              memory: "512Mi"
+              cpu: "250m"
           
-          # Liveness probe - is the process alive?
           livenessProbe:
             httpGet:
               path: /metrics
               port: metrics
-            initialDelaySeconds: 60
+            initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
           
-          # Readiness probe - can it handle traffic?
           readinessProbe:
             httpGet:
               path: /metrics
               port: metrics
-            initialDelaySeconds: 30
+            initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
@@ -79,18 +79,7 @@ spec:
                 name: imagen-config
           
           env:
-            - name: PUBSUB_SUBSCRIPTION
-              value: "upscale-jobs-sub"
-            - name: HF_HOME
-              value: "/models/huggingface"
+            - name: TRITON_URL
+              value: "triton:8001"
             - name: METRICS_PORT
               value: "8080"
-          
-          volumeMounts:
-            - name: models
-              mountPath: /models
-      
-      volumes:
-        - name: models
-          persistentVolumeClaim:
-            claimName: models-pvc

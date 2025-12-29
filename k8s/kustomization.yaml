@@ -1,8 +1,10 @@
 # =============================================================================
-# BASE KUSTOMIZATION
+# BASE KUSTOMIZATION - TRITON ARCHITECTURE
 # =============================================================================
 #
-# This is the base configuration. Use overlays for environment-specific values.
+# This configuration uses:
+# - Triton Inference Server for GPU inference (centralized)
+# - Workers for job processing (CPU-only, calls Triton via gRPC)
 #
 # For manual deployment, use overlays:
 #   kubectl apply -k k8s/overlays/dev
@@ -15,6 +17,7 @@ kind: Kustomization
 
 resources:
   - base
+  - triton
   - workers
   - autoscaling
   - monitoring

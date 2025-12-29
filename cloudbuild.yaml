@@ -1,8 +1,11 @@
 # =============================================================================
-# IMAGEN PLATFORM - CLOUD BUILD CI/CD
+# IMAGEN PLATFORM - CLOUD BUILD CI/CD (TRITON ARCHITECTURE)
 # =============================================================================
 #
-# Automatically builds and deploys on git push.
+# Builds and deploys:
+# - API image → Cloud Run
+# - Worker image → For thin workers (CPU-only)
+# - Triton image → Centralized GPU inference
 #
 # Triggers:
 #   - Push to main branch → Deploy to production
@@ -11,7 +14,7 @@
 #
 # =============================================================================
 
-timeout: 1800s  # 30 minutes max
+timeout: 2400s  # 40 minutes (Triton image is large)
 
 substitutions:
   _REGION: us-central1
@@ -39,7 +42,7 @@ steps:
       - '.'
 
   # ===========================================================================
-  # STEP 2: Build Worker Docker Image
+  # STEP 2: Build Worker Docker Image (for thin workers)
   # ===========================================================================
   - id: 'build-worker'
     name: 'gcr.io/cloud-builders/docker'
@@ -54,7 +57,22 @@ steps:
       - '.'
 
   # ===========================================================================
-  # STEP 3: Push API Image
+  # STEP 3: Build Triton Docker Image
+  # ===========================================================================
+  - id: 'build-triton'
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/triton:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/triton:latest'
+      - '-f'
+      - 'triton/Dockerfile'
+      - '.'
+
+  # ===========================================================================
+  # STEP 4: Push API Image
   # ===========================================================================
   - id: 'push-api'
     name: 'gcr.io/cloud-builders/docker'
@@ -66,7 +84,7 @@ steps:
       - 'build-api'
 
   # ===========================================================================
-  # STEP 4: Push Worker Image
+  # STEP 5: Push Worker Image
   # ===========================================================================
   - id: 'push-worker'
     name: 'gcr.io/cloud-builders/docker'
@@ -78,7 +96,19 @@ steps:
       - 'build-worker'
 
   # ===========================================================================
-  # STEP 5: Deploy API to Cloud Run
+  # STEP 6: Push Triton Image
+  # ===========================================================================
+  - id: 'push-triton'
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/triton'
+    waitFor:
+      - 'build-triton'
+
+  # ===========================================================================
+  # STEP 7: Deploy API to Cloud Run
   # ===========================================================================
   - id: 'deploy-api'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -108,7 +138,7 @@ steps:
       - 'push-api'
 
   # ===========================================================================
-  # STEP 6: Get GKE Credentials
+  # STEP 8: Get GKE Credentials
   # ===========================================================================
   - id: 'gke-credentials'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -124,9 +154,10 @@ steps:
       - '${PROJECT_ID}'
     waitFor:
       - 'push-worker'
+      - 'push-triton'
 
   # ===========================================================================
-  # STEP 7: Update Worker Image in K8s Manifests
+  # STEP 9: Update Image Tags in K8s Manifests
   # ===========================================================================
   - id: 'update-k8s-manifests'
     name: 'gcr.io/cloud-builders/gcloud'
@@ -134,15 +165,18 @@ steps:
     args:
       - '-c'
       - |
-        # Update image tags in worker manifests
+        # Update worker image in workers manifests
         for file in k8s/workers/*.yaml; do
           sed -i "s|image:.*worker.*|image: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:${SHORT_SHA}|g" "$file"
         done
+        
+        # Update Triton image
+        sed -i "s|image:.*triton.*|image: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/triton:${SHORT_SHA}|g" k8s/triton/deployment.yaml
     waitFor:
       - 'gke-credentials'
 
   # ===========================================================================
-  # STEP 8: Deploy K8s Base Resources
+  # STEP 10: Deploy K8s Base Resources
   # ===========================================================================
   - id: 'deploy-k8s-base'
     name: 'gcr.io/cloud-builders/kubectl'
@@ -157,9 +191,41 @@ steps:
       - 'update-k8s-manifests'
 
   # ===========================================================================
-  # STEP 9: Deploy Workers
+  # STEP 11: Deploy Triton Inference Server
   # ===========================================================================
-  - id: 'deploy-k8s-workers'
+  - id: 'deploy-triton'
+    name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'apply'
+      - '-f'
+      - 'k8s/triton/'
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=${_REGION}'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER}'
+    waitFor:
+      - 'deploy-k8s-base'
+
+  # ===========================================================================
+  # STEP 12: Wait for Triton to be Ready
+  # ===========================================================================
+  - id: 'wait-for-triton'
+    name: 'gcr.io/cloud-builders/kubectl'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Waiting for Triton to be ready..."
+        kubectl rollout status deployment/triton-inference-server -n ${_NAMESPACE} --timeout=600s
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=${_REGION}'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER}'
+    waitFor:
+      - 'deploy-triton'
+
+  # ===========================================================================
+  # STEP 13: Deploy Workers (CPU-only)
+  # ===========================================================================
+  - id: 'deploy-workers'
     name: 'gcr.io/cloud-builders/kubectl'
     args:
       - 'apply'
@@ -169,12 +235,12 @@ steps:
       - 'CLOUDSDK_COMPUTE_REGION=${_REGION}'
       - 'CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER}'
     waitFor:
-      - 'deploy-k8s-base'
+      - 'wait-for-triton'
 
   # ===========================================================================
-  # STEP 10: Deploy Auto-scaling (HPA)
+  # STEP 14: Deploy Auto-scaling (HPA)
   # ===========================================================================
-  - id: 'deploy-k8s-autoscaling'
+  - id: 'deploy-autoscaling'
     name: 'gcr.io/cloud-builders/kubectl'
     args:
       - 'apply'
@@ -184,10 +250,25 @@ steps:
       - 'CLOUDSDK_COMPUTE_REGION=${_REGION}'
       - 'CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER}'
     waitFor:
-      - 'deploy-k8s-workers'
+      - 'deploy-workers'
 
   # ===========================================================================
-  # STEP 11: Verify Deployment
+  # STEP 15: Deploy Monitoring
+  # ===========================================================================
+  - id: 'deploy-monitoring'
+    name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'apply'
+      - '-f'
+      - 'k8s/monitoring/'
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=${_REGION}'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER}'
+    waitFor:
+      - 'deploy-autoscaling'
+
+  # ===========================================================================
+  # STEP 16: Verify Deployment
   # ===========================================================================
   - id: 'verify-deployment'
     name: 'gcr.io/cloud-builders/kubectl'
@@ -195,20 +276,30 @@ steps:
     args:
       - '-c'
       - |
-        echo "=== Deployment Status ==="
+        echo "=============================================="
+        echo "         DEPLOYMENT STATUS                    "
+        echo "=============================================="
         echo ""
-        echo "Pods:"
-        kubectl get pods -n ${_NAMESPACE}
+        echo "=== Triton Inference Server ==="
+        kubectl get pods -n ${_NAMESPACE} -l app=triton
         echo ""
-        echo "HPAs:"
+        echo "=== Workers (CPU-only) ==="
+        kubectl get pods -n ${_NAMESPACE} -l app.kubernetes.io/component=worker
+        echo ""
+        echo "=== HPAs ==="
         kubectl get hpa -n ${_NAMESPACE}
         echo ""
-        echo "=== Deployment Complete ==="
+        echo "=== Services ==="
+        kubectl get svc -n ${_NAMESPACE}
+        echo ""
+        echo "=============================================="
+        echo "         DEPLOYMENT COMPLETE                  "
+        echo "=============================================="
     env:
       - 'CLOUDSDK_COMPUTE_REGION=${_REGION}'
       - 'CLOUDSDK_CONTAINER_CLUSTER=${_GKE_CLUSTER}'
     waitFor:
-      - 'deploy-k8s-autoscaling'
+      - 'deploy-monitoring'
 
 # ===========================================================================
 # ARTIFACTS
@@ -218,3 +309,5 @@ images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/api:latest'
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:${SHORT_SHA}'
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/worker:latest'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/triton:${SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/imagen/triton:latest'

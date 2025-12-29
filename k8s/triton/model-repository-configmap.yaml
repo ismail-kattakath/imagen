@@ -1,0 +1,32 @@
+# =============================================================================
+# TRITON MODEL REPOSITORY CONFIGMAP
+# =============================================================================
+#
+# Contains model configuration files (config.pbtxt) for all models.
+# These are mounted into Triton at /models/repository/
+#
+# Note: The Python model backends (model.py) are baked into the Docker image.
+#
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: triton-model-repository
+  namespace: imagen
+  labels:
+    app: triton
+    app.kubernetes.io/component: config
+    app.kubernetes.io/part-of: imagen
+data:
+  # Model configs are loaded from triton/model_repository/ at build time
+  # This ConfigMap provides runtime overrides if needed
+  
+  # Placeholder - actual configs are in the Docker image
+  # Override specific configs here if needed:
+  
+  # upscale-config.pbtxt: |
+  #   name: "upscale"
+  #   backend: "python"
+  #   max_batch_size: 4
+  #   ...

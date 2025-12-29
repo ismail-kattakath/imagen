@@ -1,4 +1,12 @@
-# Autoscaling kustomization
+# =============================================================================
+# THIN WORKERS AUTOSCALING
+# =============================================================================
+#
+# Simplified HPA for CPU-only thin workers.
+# Scales based on Pub/Sub queue depth - same as before, but workers are cheaper.
+#
+# =============================================================================
+
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

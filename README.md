@@ -4,13 +4,15 @@ AI-powered image processing microservices platform built for Google Cloud Platfo
 
 ## Features
 
-- **Upscale** - 4x image upscaling using Stable Diffusion
-- **Enhance** - Image quality enhancement
+- **Upscale** - 4x image upscaling using Real-ESRGAN
+- **Enhance** - Image quality enhancement using SDXL Refiner
 - **Comic Style** - Convert images to comic/cartoon style
 - **Aged Style** - Apply aged/vintage effect to images
-- **Background Remove** - Remove backgrounds from images
+- **Background Remove** - Remove backgrounds using RMBG-1.4
 
 ## Architecture
+
+Uses **NVIDIA Triton Inference Server** for efficient GPU utilization with dynamic batching.
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
@@ -18,16 +20,25 @@ AI-powered image processing microservices platform built for Google Cloud Platfo
 └─────────────┘     │  (FastAPI)   │     │   (Job Queue)   │
                     └──────────────┘     └────────┬────────┘
                                                   │
-                    ┌─────────────────────────────┼───────┐
-                    │                             ▼       │
-                    │           GKE Autopilot             │
-                    │   ┌─────────┐  ┌─────────┐          │
-                    │   │Upscale  │  │Enhance  │  ...     │
-                    │   │Worker   │  │Worker   │          │
-                    │   │(T4 GPU) │  │(T4 GPU) │          │
-                    │   └─────────┘  └─────────┘          │
-                    └─────────────────────────────────────┘
+                    ┌─────────────────────────────┼───────────────┐
+                    │           GKE Autopilot     ▼               │
+                    │                                             │
+                    │   ┌─────────────────────────────────────┐   │
+                    │   │     Workers (CPU-only)             │   │
+                    │   │  upscale │ enhance │ comic │ ...    │   │
+                    │   └─────────────────┬───────────────────┘   │
+                    │                     │ gRPC                  │
+                    │                     ▼                       │
+                    │   ┌─────────────────────────────────────┐   │
+                    │   │   Triton Inference Server (T4 GPU)  │   │
+                    │   │   • Dynamic batching (2-4 images)   │   │
+                    │   │   • All 5 models on single GPU      │   │
+                    │   │   • ~4x throughput vs old approach  │   │
+                    │   └─────────────────────────────────────┘   │
+                    └─────────────────────────────────────────────┘
 ```
+
+**Cost Savings:** 60-80% reduction by consolidating 5 GPU workers → 1-3 Triton instances.
 
 ## Quick Start
 
@@ -43,8 +54,7 @@ AI-powered image processing microservices platform built for Google Cloud Platfo
 ```bash
 # Setup environment
 cd imagen
-
-# .env file is already created - edit with your details
+cp .env.example .env
 nano .env  # Update GOOGLE_CLOUD_PROJECT and GCS_BUCKET
 
 # Install dependencies
@@ -56,32 +66,29 @@ make dev
 # Run API server
 make api
 
-# In separate terminals, run workers:
-make worker-upscale
-make worker-enhance
-make worker-comic
-make worker-aged
-make worker-background-remove
+# Run Triton locally (requires NVIDIA GPU + Docker)
+make triton-local
+
+# Run thin workers (connects to local Triton)
+make worker-triton-upscale
+make worker-triton-enhance
+# ... etc
 
 # Run tests
 make test
 ```
 
-**Note:** For local development without GCP, the API runs in debug mode and skips GCP validation.
-
 ### Model Management
 
-Models are downloaded automatically on first use (~18.5GB total). To speed up startup:
+Models are downloaded automatically by Triton on first startup (~18.5GB total).
+
+For faster cold starts, pre-download models:
 
 ```bash
-# Pre-download all models (recommended)
 make download-models
-
-# Or let them download automatically when workers start
-make worker-upscale  # Downloads on first run
 ```
 
-**See [docs/models/MODEL_MANAGEMENT.md](docs/models/MODEL_MANAGEMENT.md) for complete model management guide.**
+See [docs/models/MODEL_MANAGEMENT.md](docs/models/MODEL_MANAGEMENT.md) for details.
 
 ### API Endpoints
 
@@ -111,7 +118,18 @@ curl "http://localhost:8000/api/v1/jobs/abc-123"
 
 ## Deployment
 
-**See [docs/getting-started/FIRST_DEPLOYMENT.md](docs/getting-started/FIRST_DEPLOYMENT.md) for step-by-step deployment or [docs/deployment/PRODUCTION_DEPLOYMENT.md](docs/deployment/PRODUCTION_DEPLOYMENT.md) for complete deployment guide.**
+### Quick Deploy
+
+```bash
+# Deploy to dev
+kubectl apply -k k8s/overlays/dev
+
+# Deploy to production
+kubectl apply -k k8s/overlays/prod
+
+# Verify deployment
+kubectl get pods -n imagen
+```
 
 ### Infrastructure Setup
 
@@ -125,24 +143,15 @@ terraform plan -var-file=environments/prod.tfvars
 terraform apply -var-file=environments/prod.tfvars
 ```
 
-### Deploy Application
+### CI/CD
 
-```bash
-# Build and push images using Cloud Build (recommended)
-gcloud builds submit --config=cloudbuild.yaml
+Push to `main` triggers automatic deployment via Cloud Build:
+1. Builds API, Worker, and Triton images
+2. Deploys to GKE
+3. Waits for Triton to be ready
+4. Deploys thin workers
 
-# Deploy workers to GKE
-kubectl apply -f k8s/base/
-kubectl apply -f k8s/workers/
-
-# Verify deployment
-kubectl get pods -n imagen
-```
-
-### Cost Warning
-
-GPU workers are expensive (~$0.35/hour per T4 GPU = ~$250/month per worker).
-Set up billing alerts before deploying to production!
+See [cloudbuild.yaml](cloudbuild.yaml) for details.
 
 ## Project Structure
 
@@ -150,50 +159,48 @@ Set up billing alerts before deploying to production!
 imagen/
 ├── src/
 │   ├── api/           # FastAPI application
-│   ├── pipelines/     # ML processing pipelines
-│   ├── workers/       # Pub/Sub workers
-│   ├── services/      # GCP service integrations
+│   ├── pipelines/     # ML pipelines (legacy, for local dev)
+│   ├── workers/       # Thin workers (triton_worker.py)
+│   ├── services/      # GCP + Triton client integrations
 │   └── core/          # Configuration & utilities
+├── triton/            # Triton model repository
+│   ├── Dockerfile
+│   └── model_repository/
+│       ├── upscale/
+│       ├── enhance/
+│       ├── background_remove/
+│       ├── style_comic/
+│       └── style_aged/
 ├── docker/            # Dockerfiles
+├── k8s/               # Kubernetes manifests
+│   ├── base/
+│   ├── triton/        # Triton deployment
+│   ├── workers/       # CPU-only workers
+│   ├── autoscaling/
+│   └── overlays/
 ├── terraform/         # Infrastructure as Code
-├── k8s/              # Kubernetes manifests
-└── tests/            # Test suite
+└── docs/              # Documentation
 ```
 
 ## Configuration
-
-Environment variables:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GOOGLE_CLOUD_PROJECT` | GCP project ID | - |
 | `GCS_BUCKET` | Storage bucket name | - |
-| `DEVICE` | PyTorch device | `cuda` |
+| `TRITON_URL` | Triton gRPC endpoint | `triton:8001` |
 | `DEBUG` | Enable debug mode | `false` |
 
 ## Documentation
 
 📚 **[Complete Documentation Index](docs/README.md)**
 
-### Quick Start Guides
-
 | Guide | Description |
 |-------|-------------|
-| [⚡ Quickstart](docs/getting-started/QUICKSTART.md) | Get running locally in 10 minutes |
-| [🚀 First Deployment](docs/getting-started/FIRST_DEPLOYMENT.md) | Deploy to production step-by-step |
-| [📖 System Design](docs/core-concepts/SYSTEM_DESIGN.md) | Complete architecture and design |
-
-### Key Documentation
-
-| Document | Description |
-|----------|-------------|
-| [Quick Reference](docs/reference/QUICK_REFERENCE.md) | One-page cheat sheet for common commands |
-| [Configuration Reference](docs/reference/CONFIGURATION_REFERENCE.md) | All environment variables explained |
-| [Model Management](docs/models/MODEL_MANAGEMENT.md) | ML model lifecycle and caching |
-| [Infrastructure Guide](docs/infrastructure/INFRASTRUCTURE_OVERVIEW.md) | Terraform and Kubernetes basics |
-| [CI/CD Pipeline](docs/deployment/CICD_PIPELINE.md) | Automated build and deployment |
-| [Git Workflow](docs/development/GIT_WORKFLOW.md) | Git branching and commit conventions |
-| [Changelog](CHANGELOG.md) | Project history and changes |
+| [⚡ Quickstart](docs/getting-started/QUICKSTART.md) | Get running locally |
+| [🚀 First Deployment](docs/getting-started/FIRST_DEPLOYMENT.md) | Deploy to GKE |
+| [📖 System Design](docs/core-concepts/SYSTEM_DESIGN.md) | Architecture deep-dive |
+| [🔧 Triton Setup](triton/README.md) | Triton configuration |
 
 ## License
 

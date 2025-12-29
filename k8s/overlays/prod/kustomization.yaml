@@ -1,5 +1,5 @@
 # =============================================================================
-# PRODUCTION OVERLAY
+# PRODUCTION OVERLAY - TRITON ARCHITECTURE
 # =============================================================================
 #
 # Usage:
@@ -21,29 +21,46 @@ resources:
 # Replace image names
 images:
   - name: us-central1-docker.pkg.dev/PROJECT_ID/imagen/worker
-    newName: us-central1-docker.pkg.dev/YOUR_PROJECT_ID/imagen/worker  # ← CHANGE THIS!
-    newTag: latest  # Or pin to specific version for prod
+    newName: us-central1-docker.pkg.dev/YOUR_PROJECT_ID/imagen/worker
+    newTag: latest
+  - name: us-central1-docker.pkg.dev/PROJECT_ID/imagen/triton
+    newName: us-central1-docker.pkg.dev/YOUR_PROJECT_ID/imagen/triton
+    newTag: latest
 
 # Override ConfigMap with prod values
 configMapGenerator:
   - name: imagen-config
     behavior: replace
     literals:
-      - GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID        # ← CHANGE THIS!
-      - GCS_BUCKET=YOUR_PROJECT_ID-imagen-images    # ← CHANGE THIS!
+      - GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID
+      - GCS_BUCKET=YOUR_PROJECT_ID-imagen-images
       - MODEL_CACHE_DIR=/models
       - DEVICE=cuda
       - TORCH_DTYPE=float16
+      - TRITON_URL=triton:8001
 
 # Prod-specific patches
 patches:
-  # Higher limits for production
+  # Higher limits for Triton HPA
   - patch: |-
       - op: replace
         path: /spec/minReplicas
         value: 1
       - op: replace
         path: /spec/maxReplicas
-        value: 10
+        value: 3
     target:
       kind: HorizontalPodAutoscaler
+      name: triton-hpa
+  
+  # Higher limits for worker HPAs
+  - patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 20
+    target:
+      kind: HorizontalPodAutoscaler
+      name: ".*-worker-hpa"

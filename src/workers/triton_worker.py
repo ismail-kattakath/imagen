@@ -273,3 +273,36 @@ class TritonStyleAgedWorker(TritonWorker):
     
     def process_with_triton(self, image, params: dict):
         return self.triton.style_aged(image)
+
+
+# =============================================================================
+# MAIN ENTRY POINT
+# =============================================================================
+# Usage: python -m src.workers.triton_worker TritonUpscaleWorker
+
+WORKER_CLASSES = {
+    "TritonUpscaleWorker": TritonUpscaleWorker,
+    "TritonEnhanceWorker": TritonEnhanceWorker,
+    "TritonBackgroundRemoveWorker": TritonBackgroundRemoveWorker,
+    "TritonStyleComicWorker": TritonStyleComicWorker,
+    "TritonStyleAgedWorker": TritonStyleAgedWorker,
+}
+
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("Usage: python -m src.workers.triton_worker <WorkerClassName>")
+        print(f"Available workers: {', '.join(WORKER_CLASSES.keys())}")
+        sys.exit(1)
+    
+    worker_name = sys.argv[1]
+    
+    if worker_name not in WORKER_CLASSES:
+        print(f"Unknown worker: {worker_name}")
+        print(f"Available workers: {', '.join(WORKER_CLASSES.keys())}")
+        sys.exit(1)
+    
+    worker = WORKER_CLASSES[worker_name]()
+    worker.run()

@@ -1,11 +1,23 @@
-from src.workers.base import BaseWorker
-from src.workers.upscale import UpscaleWorker
-from src.workers.enhance import EnhanceWorker
-from src.workers.style_comic import ComicStyleWorker
+"""
+Imagen Workers
+
+Thin workers that call Triton Inference Server for ML inference.
+"""
+
+from src.workers.triton_worker import (
+    TritonWorker,
+    TritonUpscaleWorker,
+    TritonEnhanceWorker,
+    TritonBackgroundRemoveWorker,
+    TritonStyleComicWorker,
+    TritonStyleAgedWorker,
+)
 
 __all__ = [
-    "BaseWorker",
-    "UpscaleWorker",
-    "EnhanceWorker",
-    "ComicStyleWorker",
+    "TritonWorker",
+    "TritonUpscaleWorker",
+    "TritonEnhanceWorker",
+    "TritonBackgroundRemoveWorker",
+    "TritonStyleComicWorker",
+    "TritonStyleAgedWorker",
 ]
