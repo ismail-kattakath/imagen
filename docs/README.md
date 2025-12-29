@@ -81,7 +81,8 @@ Quick lookup and reference materials.
 
 Security configuration and best practices.
 
-- **[API Security Guide](security/API_SECURITY.md)** - Authentication, rate limiting, and security
+- **[Security Implementation Guide](security/SECURITY_IMPLEMENTATION.md)** - Complete security architecture
+- **[API Security Guide](security/API_SECURITY.md)** - Authentication, rate limiting, and API security
 
 ### 📊 Observability
 
