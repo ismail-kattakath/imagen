@@ -26,8 +26,9 @@ class JobServiceProtocol(Protocol):
         job_type: str,
         input_path: str,
         params: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict:
-        """Create a new job record."""
+        """Create a new job record with optional metadata."""
         ...
 
     def get(self, job_id: str) -> dict:
@@ -63,8 +64,9 @@ class LocalJobService:
         job_type: str,
         input_path: str,
         params: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict:
-        """Create a new job record."""
+        """Create a new job record with optional metadata."""
         now = datetime.now(timezone.utc)
 
         job_data = {
@@ -74,6 +76,7 @@ class LocalJobService:
             "input_path": input_path,
             "output_path": None,
             "params": params or {},
+            "metadata": metadata or {},
             "error": None,
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
@@ -137,10 +140,11 @@ class JobService:
         job_type: str,
         input_path: str,
         params: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict:
-        """Create a new job record."""
+        """Create a new job record with optional metadata."""
         now = datetime.now(timezone.utc)
-        
+
         job_data = {
             "job_id": job_id,
             "type": job_type,
@@ -148,11 +152,12 @@ class JobService:
             "input_path": input_path,
             "output_path": None,
             "params": params or {},
+            "metadata": metadata or {},
             "error": None,
             "created_at": now,
             "updated_at": now,
         }
-        
+
         self.collection.document(job_id).set(job_data)
         logger.info(f"Created job {job_id}")
         return job_data

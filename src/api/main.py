@@ -48,6 +48,11 @@ async def lifespan(app: FastAPI):
         try:
             settings.validate_gcp_config()
             logger.info("GCP configuration validated")
+
+            # Validate CORS in production
+            if not settings.cors_origins:
+                raise ValueError("CORS_ORIGINS must be set in production (not default to wildcard)")
+            logger.info(f"CORS origins: {settings.cors_origins}")
         except ValueError as e:
             logger.error(f"Configuration error: {e}")
             raise
@@ -93,7 +98,7 @@ app.add_middleware(SizeLimitMiddleware)
 # 5. CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS or ["*"],
+    allow_origins=settings.cors_origins or ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
