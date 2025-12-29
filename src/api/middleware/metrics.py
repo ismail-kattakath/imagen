@@ -12,24 +12,22 @@
 #
 # =============================================================================
 
-from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.routing import Match
-from typing import Callable
 import time
 
+from fastapi import Request, Response
 from prometheus_client import (
-    Counter,
-    Histogram,
-    Gauge,
-    Info,
-    generate_latest,
     CONTENT_TYPE_LATEST,
     REGISTRY,
+    Counter,
+    Gauge,
+    Histogram,
+    Info,
+    generate_latest,
 )
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.routing import Match
 
 from src.core.config import settings
-
 
 # =============================================================================
 # METRIC DEFINITIONS
@@ -40,10 +38,12 @@ APP_INFO = Info(
     "imagen_app",
     "Application information",
 )
-APP_INFO.info({
-    "version": "1.0.0",
-    "environment": "production" if settings.is_production() else "development",
-})
+APP_INFO.info(
+    {
+        "version": "1.0.0",
+        "environment": "production" if settings.is_production() else "development",
+    }
+)
 
 # Request metrics
 REQUEST_COUNT = Counter(
@@ -104,13 +104,13 @@ FILE_SIZE_BYTES = Histogram(
     "Uploaded file sizes in bytes",
     ["job_type"],
     buckets=(
-        100 * 1024,          # 100 KB
-        500 * 1024,          # 500 KB
-        1 * 1024 * 1024,     # 1 MB
-        5 * 1024 * 1024,     # 5 MB
-        10 * 1024 * 1024,    # 10 MB
-        25 * 1024 * 1024,    # 25 MB
-        50 * 1024 * 1024,    # 50 MB
+        100 * 1024,  # 100 KB
+        500 * 1024,  # 500 KB
+        1 * 1024 * 1024,  # 1 MB
+        5 * 1024 * 1024,  # 5 MB
+        10 * 1024 * 1024,  # 10 MB
+        25 * 1024 * 1024,  # 25 MB
+        50 * 1024 * 1024,  # 50 MB
     ),
 )
 
@@ -119,24 +119,25 @@ FILE_SIZE_BYTES = Histogram(
 # METRICS MIDDLEWARE
 # =============================================================================
 
+
 class MetricsMiddleware(BaseHTTPMiddleware):
     """Middleware to collect request metrics."""
-    
+
     async def dispatch(self, request: Request, call_next):
         # Skip metrics endpoint itself
         if request.url.path == "/metrics":
             return await call_next(request)
-        
+
         # Get endpoint name (route path, not actual URL)
         endpoint = self._get_endpoint(request)
         method = request.method
-        
+
         # Track in-progress requests
         REQUESTS_IN_PROGRESS.labels(method=method, endpoint=endpoint).inc()
-        
+
         # Time the request
         start_time = time.time()
-        
+
         try:
             response = await call_next(request)
             status_code = response.status_code
@@ -147,26 +148,26 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         finally:
             # Calculate duration
             duration = time.time() - start_time
-            
+
             # Record metrics
             REQUEST_COUNT.labels(
                 method=method,
                 endpoint=endpoint,
                 status_code=status_code,
             ).inc()
-            
+
             REQUEST_LATENCY.labels(
                 method=method,
                 endpoint=endpoint,
             ).observe(duration)
-            
+
             REQUESTS_IN_PROGRESS.labels(
                 method=method,
                 endpoint=endpoint,
             ).dec()
-        
+
         return response
-    
+
     def _get_endpoint(self, request: Request) -> str:
         """Get the route pattern (e.g., /api/v1/jobs/{job_id})."""
         # Try to match against routes to get pattern
@@ -174,13 +175,14 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             match, scope = route.matches(request.scope)
             if match == Match.FULL:
                 return route.path
-        
+
         # Fall back to actual path (normalize IDs)
         return self._normalize_path(request.url.path)
-    
+
     def _normalize_path(self, path: str) -> str:
         """Normalize path to prevent high cardinality."""
         import re
+
         # Replace UUIDs with placeholder
         path = re.sub(
             r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
@@ -196,6 +198,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 # METRICS ENDPOINT
 # =============================================================================
 
+
 async def metrics_endpoint(request: Request) -> Response:
     """Prometheus metrics endpoint."""
     return Response(
@@ -208,30 +211,31 @@ async def metrics_endpoint(request: Request) -> Response:
 # BUSINESS METRICS HELPERS
 # =============================================================================
 
+
 class MetricsRecorder:
     """Helper class to record business metrics."""
-    
+
     @staticmethod
     def job_created(job_type: str):
         """Record job creation."""
         JOBS_CREATED.labels(job_type=job_type).inc()
-    
+
     @staticmethod
     def job_completed(job_type: str, status: str, duration: float):
         """Record job completion."""
         JOBS_COMPLETED.labels(job_type=job_type, status=status).inc()
         JOB_PROCESSING_TIME.labels(job_type=job_type).observe(duration)
-    
+
     @staticmethod
     def file_uploaded(job_type: str, size_bytes: int):
         """Record file upload."""
         FILE_SIZE_BYTES.labels(job_type=job_type).observe(size_bytes)
-    
+
     @staticmethod
     def set_queue_depth(queue_name: str, depth: int):
         """Set current queue depth."""
         QUEUE_DEPTH.labels(queue_name=queue_name).set(depth)
-    
+
     @staticmethod
     def record_error(error_type: str, endpoint: str):
         """Record an error."""

@@ -1,35 +1,36 @@
-from google.cloud import storage
-from PIL import Image
-from typing import Protocol
 import io
 from datetime import timedelta
 from pathlib import Path
+from typing import Protocol
+
+from google.cloud import storage
+from PIL import Image
 
 from src.core.config import settings
-from src.core.logging import logger
 from src.core.exceptions import StorageError
+from src.core.logging import logger
 
 
 class GCSStorageService:
     """Google Cloud Storage service for image storage."""
-    
+
     def __init__(self, bucket_name: str | None = None):
         self.bucket_name = bucket_name or settings.gcs_bucket
         self._client: storage.Client | None = None
         self._bucket: storage.Bucket | None = None
-    
+
     @property
     def client(self) -> storage.Client:
         if self._client is None:
             self._client = storage.Client()
         return self._client
-    
+
     @property
     def bucket(self) -> storage.Bucket:
         if self._bucket is None:
             self._bucket = self.client.bucket(self.bucket_name)
         return self._bucket
-    
+
     def upload_image(
         self,
         image: Image.Image,
@@ -39,20 +40,20 @@ class GCSStorageService:
         """Upload a PIL Image to GCS."""
         try:
             blob = self.bucket.blob(path)
-            
+
             buffer = io.BytesIO()
             image.save(buffer, format=format)
             buffer.seek(0)
-            
+
             content_type = f"image/{format.lower()}"
             blob.upload_from_file(buffer, content_type=content_type)
-            
+
             logger.info(f"Uploaded image to gs://{self.bucket_name}/{path}")
             return f"gs://{self.bucket_name}/{path}"
-            
+
         except Exception as e:
             raise StorageError(f"Failed to upload image: {e}") from e
-    
+
     def download_image(self, path: str) -> Image.Image:
         """Download an image from GCS."""
         try:
@@ -61,10 +62,10 @@ class GCSStorageService:
             blob.download_to_file(buffer)
             buffer.seek(0)
             return Image.open(buffer)
-            
+
         except Exception as e:
             raise StorageError(f"Failed to download image: {e}") from e
-    
+
     def get_signed_url(
         self,
         path: str,
@@ -80,7 +81,7 @@ class GCSStorageService:
             return url
         except Exception as e:
             raise StorageError(f"Failed to generate signed URL: {e}") from e
-    
+
     def delete(self, path: str) -> None:
         """Delete a file from GCS."""
         try:

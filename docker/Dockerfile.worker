@@ -1,28 +1,26 @@
 # =============================================================================
-# GPU WORKER DOCKERFILE
+# TRITON WORKER DOCKERFILE (CPU-only, Thin Workers)
 # =============================================================================
 #
-# Parameterized Dockerfile for all worker types.
+# Lightweight CPU workers that process jobs by calling Triton Inference Server.
+# These workers pull jobs from Pub/Sub, call Triton via gRPC, and update job status.
 #
-# Build specific worker:
-#   docker build --build-arg WORKER=upscale -t imagen-worker-upscale .
-#   docker build --build-arg WORKER=enhance -t imagen-worker-enhance .
-#   docker build --build-arg WORKER=style_comic -t imagen-worker-comic .
-#   docker build --build-arg WORKER=background_remove -t imagen-worker-bg .
+# Build:
+#   docker build -f docker/Dockerfile.worker -t imagen-triton-worker .
 #
-# Available workers:
-#   - upscale           (src/workers/upscale.py)
-#   - enhance           (src/workers/enhance.py)
-#   - style_comic       (src/workers/style_comic.py)
-#   - style_aged        (src/workers/style_aged.py)
-#   - background_remove (src/workers/background_remove.py)
+# Run with model type:
+#   docker run -e MODEL_NAME=upscale -e TRITON_URL=triton:8001 imagen-triton-worker
+#   docker run -e MODEL_NAME=enhance -e TRITON_URL=triton:8001 imagen-triton-worker
+#   docker run -e MODEL_NAME=style_comic -e TRITON_URL=triton:8001 imagen-triton-worker
+#   docker run -e MODEL_NAME=style_aged -e TRITON_URL=triton:8001 imagen-triton-worker
+#   docker run -e MODEL_NAME=background_remove -e TRITON_URL=triton:8001 imagen-triton-worker
 #
-# For production, Cloud Build creates one image with all workers,
-# and the WORKER env var selects which one to run.
+# All workers use the same code (src/workers/triton_worker.py) and communicate
+# with the centralized Triton Inference Server for GPU inference.
 #
 # =============================================================================
 
-FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+FROM python:3.11-slim
 
 WORKDIR /app
 
@@ -43,35 +41,29 @@ RUN pip install --no-cache-dir .
 COPY src/ src/
 
 # =============================================================================
-# WORKER SELECTION
+# WORKER CONFIGURATION
 # =============================================================================
-# Build-time argument (default: upscale)
-ARG WORKER=upscale
+# Model name (required at runtime)
+ENV MODEL_NAME=""
 
-# Runtime environment variable (can override at runtime)
-ENV WORKER=${WORKER}
+# Triton server URL (required at runtime)
+ENV TRITON_URL=""
 
 # =============================================================================
 # ENVIRONMENT
 # =============================================================================
 ENV PYTHONUNBUFFERED=1
-ENV HF_HOME=/models/huggingface
-ENV TRANSFORMERS_CACHE=/models/huggingface
-ENV TORCH_HOME=/models/torch
-
-# Default to CUDA, falls back to CPU if not available
-ENV DEVICE=cuda
 
 # =============================================================================
 # HEALTH CHECK
 # =============================================================================
 # Workers don't have HTTP endpoints, so we check if the process is running
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD pgrep -f "python -m src.workers" || exit 1
+    CMD pgrep -f "python -m src.workers.triton_worker" || exit 1
 
 # =============================================================================
 # ENTRYPOINT
 # =============================================================================
-# Run the selected worker
-# Can be overridden at runtime: docker run -e WORKER=enhance imagen-worker
-CMD python -m src.workers.${WORKER}
+# Run the Triton worker with the specified model
+# Requires MODEL_NAME and TRITON_URL environment variables at runtime
+CMD python -m src.workers.triton_worker

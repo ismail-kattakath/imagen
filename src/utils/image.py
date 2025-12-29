@@ -1,6 +1,7 @@
-from PIL import Image
-import io
 import base64
+import io
+
+from PIL import Image
 
 
 def image_to_base64(image: Image.Image, format: str = "PNG") -> str:
@@ -24,15 +25,15 @@ def resize_for_model(
 ) -> Image.Image:
     """Resize image to fit model constraints."""
     width, height = image.size
-    
+
     # Scale down if needed
     if max(width, height) > max_size:
         scale = max_size / max(width, height)
         width = int(width * scale)
         height = int(height * scale)
-    
+
     # Make divisible
     width = (width // divisible_by) * divisible_by
     height = (height // divisible_by) * divisible_by
-    
+
     return image.resize((width, height), Image.Resampling.LANCZOS)

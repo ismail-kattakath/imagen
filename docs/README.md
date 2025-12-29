@@ -77,6 +77,18 @@ Quick lookup and reference materials.
 - **[Quick Reference](reference/QUICK_REFERENCE.md)** - One-page cheat sheet
 - **[Configuration Reference](reference/CONFIGURATION_REFERENCE.md)** - All environment variables
 
+### 🔒 Security
+
+Security configuration and best practices.
+
+- **[API Security Guide](security/API_SECURITY.md)** - Authentication, rate limiting, and security
+
+### 📊 Observability
+
+Monitoring, metrics, and logging.
+
+- **[Observability Guide](observability/OBSERVABILITY_GUIDE.md)** - Prometheus metrics, logging, and monitoring
+
 ---
 
 ## 🎭 Documentation by Persona

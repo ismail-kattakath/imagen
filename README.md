@@ -159,8 +159,7 @@ See [cloudbuild.yaml](cloudbuild.yaml) for details.
 imagen/
 ├── src/
 │   ├── api/           # FastAPI application
-│   ├── pipelines/     # ML pipelines (legacy, for local dev)
-│   ├── workers/       # Thin workers (triton_worker.py)
+│   ├── workers/       # Triton workers (triton_worker.py)
 │   ├── services/      # GCP + Triton client integrations
 │   └── core/          # Configuration & utilities
 ├── triton/            # Triton model repository
