@@ -1,14 +1,18 @@
+import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings
 
+from src.utils.secrets import get_secret_or_env, parse_json_secret, parse_list_secret
+
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables.
+    """Application settings loaded from environment variables and Secret Manager.
 
     Configuration is loaded from:
-    1. Environment variables (uppercase with underscores)
-    2. .env file (if present)
+    1. Google Cloud Secret Manager (production)
+    2. Environment variables (local dev)
+    3. .env file (if present)
 
     Example:
         API_HOST=0.0.0.0
@@ -21,19 +25,53 @@ class Settings(BaseSettings):
     api_port: int = 8000  # API server port
     debug: bool = False  # Enable debug mode (disables GCP validation)
 
-    # Authentication
-    jwt_secret: str | None = None  # JWT signing secret (required in production)
-    api_keys: list | None = None  # Pre-configured API keys (JSON list)
+    # Google Cloud Platform Configuration
+    google_cloud_project: str = ""  # GCP project ID
+    gcs_bucket: str = ""  # Google Cloud Storage bucket name
 
     # Rate Limiting
     redis_url: str | None = None  # Redis URL for distributed rate limiting
 
-    # CORS
-    cors_origins: list[str] | None = None  # Allowed CORS origins
+    # Secrets (loaded from Secret Manager in production, env vars in dev)
+    _jwt_secret: str | None = None
+    _api_keys: list | None = None
+    _cors_origins: list[str] | None = None
 
-    # Google Cloud Platform Configuration
-    google_cloud_project: str = ""  # GCP project ID
-    gcs_bucket: str = ""  # Google Cloud Storage bucket name
+    @property
+    def jwt_secret(self) -> str | None:
+        """Get JWT secret from Secret Manager or environment."""
+        if self._jwt_secret is None:
+            secret_value = get_secret_or_env(
+                self.google_cloud_project,
+                "jwt-secret",
+                "JWT_SECRET"
+            )
+            self._jwt_secret = secret_value
+        return self._jwt_secret
+
+    @property
+    def api_keys(self) -> list | None:
+        """Get API keys from Secret Manager or environment."""
+        if self._api_keys is None:
+            secret_value = get_secret_or_env(
+                self.google_cloud_project,
+                "api-keys",
+                "API_KEYS"
+            )
+            self._api_keys = parse_json_secret(secret_value)
+        return self._api_keys
+
+    @property
+    def cors_origins(self) -> list[str] | None:
+        """Get CORS origins from Secret Manager or environment."""
+        if self._cors_origins is None:
+            secret_value = get_secret_or_env(
+                self.google_cloud_project,
+                "cors-origins",
+                "CORS_ORIGINS"
+            )
+            self._cors_origins = parse_list_secret(secret_value)
+        return self._cors_origins
 
     def validate_gcp_config(self) -> None:
         """Validate that required GCP settings are configured.

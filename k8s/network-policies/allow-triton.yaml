@@ -1,0 +1,58 @@
+# =============================================================================
+# ALLOW TRITON NETWORK POLICY
+# =============================================================================
+# Allows workers to communicate with Triton Inference Server
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-triton-ingress
+  namespace: imagen
+spec:
+  podSelector:
+    matchLabels:
+      app: triton
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow workers to connect to Triton gRPC port
+    - from:
+        - podSelector:
+            matchLabels:
+              component: worker
+      ports:
+        - protocol: TCP
+          port: 8001  # Triton gRPC
+        - protocol: TCP
+          port: 8000  # Triton HTTP (for health checks)
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-worker-to-triton
+  namespace: imagen
+spec:
+  podSelector:
+    matchLabels:
+      component: worker
+  policyTypes:
+    - Egress
+  egress:
+    # Allow workers to connect to Triton
+    - to:
+        - podSelector:
+            matchLabels:
+              app: triton
+      ports:
+        - protocol: TCP
+          port: 8001  # Triton gRPC
+        - protocol: TCP
+          port: 8000  # Triton HTTP
+    # Allow workers to access GCP APIs (Pub/Sub, GCS, Firestore)
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443  # HTTPS for GCP APIs

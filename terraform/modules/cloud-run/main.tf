@@ -61,6 +61,12 @@ variable "allow_unauthenticated" {
   default     = true
 }
 
+variable "vpc_connector_name" {
+  description = "VPC connector name for private networking"
+  type        = string
+  default     = null
+}
+
 # =============================================================================
 # CLOUD RUN SERVICE
 # =============================================================================
@@ -71,6 +77,15 @@ resource "google_cloud_run_v2_service" "api" {
 
   template {
     service_account = var.service_account_email
+
+    # VPC access configuration (connect to private VPC)
+    dynamic "vpc_access" {
+      for_each = var.vpc_connector_name != null ? [1] : []
+      content {
+        connector = var.vpc_connector_name
+        egress    = "PRIVATE_RANGES_ONLY"
+      }
+    }
 
     containers {
       image = var.image

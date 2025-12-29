@@ -21,5 +21,6 @@ resources:
   - workers
   - autoscaling
   - monitoring
+  - network-policies
 
 namespace: imagen
