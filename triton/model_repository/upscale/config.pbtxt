@@ -1,0 +1,63 @@
+# Triton Model Configuration for Upscale Pipeline
+# Uses Python backend with Real-ESRGAN model
+
+name: "upscale"
+backend: "python"
+
+# Maximum batch size - Triton will batch up to this many requests
+max_batch_size: 4
+
+# Input: Raw image bytes
+input [
+  {
+    name: "IMAGE"
+    data_type: TYPE_UINT8
+    dims: [-1]  # Variable length byte array
+  },
+  {
+    name: "SCALE"
+    data_type: TYPE_FP32
+    dims: [1]
+    optional: true
+  }
+]
+
+# Output: Processed image bytes (PNG)
+output [
+  {
+    name: "OUTPUT_IMAGE"
+    data_type: TYPE_UINT8
+    dims: [-1]  # Variable length byte array
+  }
+]
+
+# Dynamic batching configuration
+dynamic_batching {
+  # Preferred batch sizes for efficiency
+  preferred_batch_size: [2, 4]
+  
+  # Maximum time to wait for a batch to form (microseconds)
+  # 100ms = good balance between latency and throughput
+  max_queue_delay_microseconds: 100000
+  
+  # Preserve ordering of responses
+  preserve_ordering: true
+}
+
+# Instance configuration
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+    gpus: [0]
+  }
+]
+
+# Model parameters
+parameters: {
+  key: "model_path"
+  value: {string_value: "/models/huggingface/realesrgan"}
+}
+
+# Version policy - use latest
+version_policy: {latest: {num_versions: 1}}

@@ -3,6 +3,10 @@ kind: Deployment
 metadata:
   name: enhance-worker
   namespace: imagen
+  labels:
+    app: enhance-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: imagen
 spec:
   replicas: 1
   selector:
@@ -12,6 +16,12 @@ spec:
     metadata:
       labels:
         app: enhance-worker
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: imagen
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: imagen-worker
       
@@ -29,6 +39,11 @@ spec:
           args: ["-m", "src.workers.enhance"]
           command: ["python"]
           
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+          
           resources:
             limits:
               nvidia.com/gpu: 1
@@ -36,6 +51,24 @@ spec:
             requests:
               memory: "8Gi"
               cpu: "2"
+          
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           
           envFrom:
             - configMapRef:
@@ -46,6 +79,8 @@ spec:
               value: "enhance-jobs-sub"
             - name: HF_HOME
               value: "/models/huggingface"
+            - name: METRICS_PORT
+              value: "8080"
           
           volumeMounts:
             - name: models

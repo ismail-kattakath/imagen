@@ -1,0 +1,51 @@
+# Triton Model Configuration for Background Removal Pipeline
+# Uses Python backend with RMBG-1.4 model
+
+name: "background_remove"
+backend: "python"
+
+# Larger batch size - RMBG is memory efficient
+max_batch_size: 8
+
+input [
+  {
+    name: "IMAGE"
+    data_type: TYPE_UINT8
+    dims: [-1]
+  }
+]
+
+output [
+  {
+    name: "OUTPUT_IMAGE"
+    data_type: TYPE_UINT8
+    dims: [-1]
+  },
+  {
+    name: "MASK"
+    data_type: TYPE_UINT8
+    dims: [-1]
+    optional: true
+  }
+]
+
+dynamic_batching {
+  preferred_batch_size: [4, 8]
+  max_queue_delay_microseconds: 50000  # 50ms - fast model
+  preserve_ordering: true
+}
+
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+    gpus: [0]
+  }
+]
+
+parameters: {
+  key: "model_id"
+  value: {string_value: "briaai/RMBG-1.4"}
+}
+
+version_policy: {latest: {num_versions: 1}}

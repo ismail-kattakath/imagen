@@ -149,6 +149,49 @@ k8s-deploy-all: k8s-deploy-dev
 
 
 # =============================================================================
+# MONITORING (Google Managed Prometheus)
+# =============================================================================
+
+# Deploy GMP PodMonitoring and rules
+monitoring-deploy:
+	@echo "Deploying Google Managed Prometheus monitoring..."
+	kubectl apply -k k8s/monitoring/
+	@echo "Monitoring deployed! Metrics will appear in Cloud Monitoring within 2-3 minutes."
+
+# Check GMP is running
+monitoring-check-gmp:
+	@echo "Checking GMP system pods..."
+	kubectl get pods -n gmp-system
+
+# Check PodMonitoring resources
+monitoring-status:
+	@echo "PodMonitoring resources:"
+	kubectl get podmonitoring -n imagen
+	@echo ""
+	@echo "Rules:"
+	kubectl get rules -n imagen
+
+# View worker metrics locally (port-forward)
+monitoring-port-forward:
+	@echo "Port-forwarding worker metrics to localhost:8080..."
+	@echo "Visit http://localhost:8080/metrics to see Prometheus metrics"
+	kubectl port-forward -n imagen deployment/upscale-worker 8080:8080
+
+# Query metrics via gcloud (example)
+monitoring-query-example:
+	@echo "Example PromQL query via Cloud Monitoring API:"
+	@echo ""
+	@echo "gcloud monitoring query --project=YOUR_PROJECT_ID \\"
+	@echo "  'fetch prometheus_target"
+	@echo "   | metric \"prometheus.googleapis.com/imagen_jobs_completed_total/counter\""
+	@echo "   | every 1m'"
+
+# Delete monitoring resources
+monitoring-delete:
+	kubectl delete -k k8s/monitoring/
+
+
+# =============================================================================
 # CI/CD (Cloud Build)
 # =============================================================================
 
@@ -178,7 +221,7 @@ build-triggers:
 # =============================================================================
 
 # Complete first-time deployment
-deploy-all: tf-apply build-manual
+deploy-all: tf-apply build-manual monitoring-deploy
 	@echo ""
 	@echo "=============================================="
 	@echo "  DEPLOYMENT COMPLETE!"
@@ -190,4 +233,82 @@ deploy-all: tf-apply build-manual
 	@echo "  1. Connect GitHub for automatic deployments"
 	@echo "  2. Update terraform with github_owner/github_repo"
 	@echo "  3. Push to main branch to trigger deployment"
+	@echo "  4. Check metrics: make monitoring-status"
 	@echo ""
+
+
+# =============================================================================
+# TRITON INFERENCE SERVER
+# =============================================================================
+
+# Build custom Triton image
+triton-build:
+	@echo "Building custom Triton image..."
+	docker build -t triton-imagen -f triton/Dockerfile .
+
+# Push Triton image to Artifact Registry
+triton-push:
+	@echo "Pushing Triton image to Artifact Registry..."
+	docker tag triton-imagen us-central1-docker.pkg.dev/$(PROJECT_ID)/imagen/triton:latest
+	docker push us-central1-docker.pkg.dev/$(PROJECT_ID)/imagen/triton:latest
+
+# Deploy Triton to GKE
+triton-deploy:
+	@echo "Deploying Triton Inference Server..."
+	kubectl apply -k k8s/triton/
+
+# Check Triton status
+triton-status:
+	@echo "Triton pods:"
+	kubectl get pods -n imagen -l app=triton
+	@echo ""
+	@echo "Triton service:"
+	kubectl get svc -n imagen triton
+
+# Port-forward to Triton (for local testing)
+triton-port-forward:
+	@echo "Port-forwarding Triton..."
+	@echo "HTTP: localhost:8000, gRPC: localhost:8001, Metrics: localhost:8002"
+	kubectl port-forward -n imagen svc/triton 8000:8000 8001:8001 8002:8002
+
+# Check Triton health
+triton-health:
+	@echo "Checking Triton health..."
+	curl -s http://localhost:8000/v2/health/ready && echo " Ready!" || echo " Not ready"
+
+# List loaded models
+triton-models:
+	@echo "Loaded models:"
+	curl -s http://localhost:8000/v2/models | jq
+
+# Check specific model status
+triton-model-status:
+	@echo "Enter model name (upscale, enhance, background_remove, style_comic, style_aged):"
+	@read MODEL && curl -s http://localhost:8000/v2/models/$$MODEL | jq
+
+# View Triton metrics
+triton-metrics:
+	curl -s http://localhost:8002/metrics | grep -E "^nv_inference|^nv_gpu"
+
+# Delete Triton
+triton-delete:
+	kubectl delete -k k8s/triton/
+
+# Full Triton deployment
+triton-deploy-full: triton-build triton-push triton-deploy
+	@echo "Triton deployment complete!"
+
+
+# =============================================================================
+# TRITON WORKERS (Alternative to standard workers)
+# =============================================================================
+
+# Run Triton-based workers locally (for development)
+triton-worker-upscale:
+	TRITON_URL=localhost:8001 python -c "from src.workers.triton_worker import TritonUpscaleWorker; TritonUpscaleWorker().run()"
+
+triton-worker-enhance:
+	TRITON_URL=localhost:8001 python -c "from src.workers.triton_worker import TritonEnhanceWorker; TritonEnhanceWorker().run()"
+
+triton-worker-background-remove:
+	TRITON_URL=localhost:8001 python -c "from src.workers.triton_worker import TritonBackgroundRemoveWorker; TritonBackgroundRemoveWorker().run()"

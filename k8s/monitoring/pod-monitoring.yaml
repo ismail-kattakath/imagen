@@ -1,0 +1,145 @@
+# =============================================================================
+# GOOGLE MANAGED PROMETHEUS - POD MONITORING
+# =============================================================================
+#
+# PodMonitoring resources tell GMP to scrape Prometheus metrics from pods.
+# Each worker type has its own PodMonitoring for independent scraping.
+#
+# Metrics are sent to Cloud Monitoring and queryable via PromQL.
+#
+# =============================================================================
+
+---
+# Upscale Worker Monitoring
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: upscale-worker-monitoring
+  namespace: imagen
+  labels:
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: imagen
+spec:
+  selector:
+    matchLabels:
+      app: upscale-worker
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      timeout: 10s
+  targetLabels:
+    metadata:
+      - pod
+      - container
+    fromPod:
+      - from: app
+        to: worker_type
+
+---
+# Enhance Worker Monitoring
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: enhance-worker-monitoring
+  namespace: imagen
+  labels:
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: imagen
+spec:
+  selector:
+    matchLabels:
+      app: enhance-worker
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      timeout: 10s
+  targetLabels:
+    metadata:
+      - pod
+      - container
+    fromPod:
+      - from: app
+        to: worker_type
+
+---
+# Comic Style Worker Monitoring
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: comic-worker-monitoring
+  namespace: imagen
+  labels:
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: imagen
+spec:
+  selector:
+    matchLabels:
+      app: comic-worker
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      timeout: 10s
+  targetLabels:
+    metadata:
+      - pod
+      - container
+    fromPod:
+      - from: app
+        to: worker_type
+
+---
+# Style Aged Worker Monitoring
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: style-aged-worker-monitoring
+  namespace: imagen
+  labels:
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: imagen
+spec:
+  selector:
+    matchLabels:
+      app: style-aged-worker
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      timeout: 10s
+  targetLabels:
+    metadata:
+      - pod
+      - container
+    fromPod:
+      - from: app
+        to: worker_type
+
+---
+# Background Remove Worker Monitoring
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: background-remove-worker-monitoring
+  namespace: imagen
+  labels:
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: imagen
+spec:
+  selector:
+    matchLabels:
+      app: background-remove-worker
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      timeout: 10s
+  targetLabels:
+    metadata:
+      - pod
+      - container
+    fromPod:
+      - from: app
+        to: worker_type

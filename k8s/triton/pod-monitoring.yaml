@@ -1,0 +1,30 @@
+# =============================================================================
+# TRITON PODMONITORING
+# =============================================================================
+#
+# Triton exposes metrics at :8002/metrics automatically.
+# This PodMonitoring tells GMP to scrape them.
+#
+# =============================================================================
+
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: triton-monitoring
+  namespace: imagen
+  labels:
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: imagen
+spec:
+  selector:
+    matchLabels:
+      app: triton
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      timeout: 10s
+  targetLabels:
+    metadata:
+      - pod
+      - container

@@ -1,0 +1,214 @@
+# =============================================================================
+# TRITON INFERENCE SERVER DEPLOYMENT
+# =============================================================================
+#
+# Triton handles all model inference with automatic batching.
+# Workers send gRPC requests to Triton instead of loading models directly.
+#
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: triton-inference-server
+  namespace: imagen
+  labels:
+    app: triton
+    app.kubernetes.io/component: inference
+    app.kubernetes.io/part-of: imagen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: triton
+  template:
+    metadata:
+      labels:
+        app: triton
+        app.kubernetes.io/component: inference
+        app.kubernetes.io/part-of: imagen
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8002"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: imagen-worker
+      
+      # GPU node selection
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-tesla-t4
+      
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      
+      containers:
+        - name: triton
+          # Use NGC Triton image with Python backend
+          image: nvcr.io/nvidia/tritonserver:24.01-py3
+          
+          args:
+            - tritonserver
+            - --model-repository=/models
+            - --log-verbose=1
+            - --log-info=true
+            - --log-warning=true
+            - --log-error=true
+            # Enable metrics
+            - --metrics-port=8002
+            - --allow-metrics=true
+            # Strict mode - fail if model can't load
+            - --strict-model-config=false
+            # CUDA memory management
+            - --cuda-memory-pool-byte-size=0:2147483648  # 2GB pool on GPU 0
+          
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: grpc
+              containerPort: 8001
+              protocol: TCP
+            - name: metrics
+              containerPort: 8002
+              protocol: TCP
+          
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "24Gi"
+            requests:
+              memory: "16Gi"
+              cpu: "4"
+          
+          # Health checks
+          livenessProbe:
+            httpGet:
+              path: /v2/health/live
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /v2/health/ready
+              port: http
+            initialDelaySeconds: 120  # Models take time to load
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 3
+          
+          # Startup probe - give models time to load
+          startupProbe:
+            httpGet:
+              path: /v2/health/ready
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 30  # 5 minutes max startup
+          
+          env:
+            - name: HF_HOME
+              value: "/models/huggingface"
+            - name: TRANSFORMERS_CACHE
+              value: "/models/huggingface"
+            # Optimize CUDA
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0"
+          
+          volumeMounts:
+            - name: models
+              mountPath: /models
+            - name: model-repository
+              mountPath: /models/repository
+            - name: shm
+              mountPath: /dev/shm
+      
+      volumes:
+        # Persistent model storage
+        - name: models
+          persistentVolumeClaim:
+            claimName: models-pvc
+        # Model repository (config files)
+        - name: model-repository
+          configMap:
+            name: triton-model-repository
+        # Shared memory for PyTorch DataLoader
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+
+---
+# =============================================================================
+# TRITON SERVICE
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: triton
+  namespace: imagen
+  labels:
+    app: triton
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+    - name: grpc
+      port: 8001
+      targetPort: 8001
+      protocol: TCP
+    - name: metrics
+      port: 8002
+      targetPort: 8002
+      protocol: TCP
+  selector:
+    app: triton
+
+---
+# =============================================================================
+# TRITON HPA (Optional - for multiple Triton instances)
+# =============================================================================
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: triton-hpa
+  namespace: imagen
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: triton-inference-server
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    # Scale based on GPU utilization
+    - type: Pods
+      pods:
+        metric:
+          name: triton_inference_queue_duration_us
+        target:
+          type: AverageValue
+          averageValue: "100000"  # 100ms queue time
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

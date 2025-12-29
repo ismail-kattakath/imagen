@@ -1,0 +1,176 @@
+# =============================================================================
+# PROMETHEUS RECORDING & ALERTING RULES
+# =============================================================================
+#
+# Recording rules pre-compute frequently used queries for faster dashboards.
+# Alerting rules define conditions that trigger notifications.
+#
+# These rules are processed by Google Managed Prometheus.
+#
+# =============================================================================
+
+apiVersion: monitoring.googleapis.com/v1
+kind: Rules
+metadata:
+  name: imagen-rules
+  namespace: imagen
+  labels:
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: imagen
+spec:
+  groups:
+    # =========================================================================
+    # RECORDING RULES
+    # Pre-compute expensive queries for dashboard performance
+    # =========================================================================
+    - name: imagen.recording.rules
+      interval: 30s
+      rules:
+        # Job completion rate by type (per second)
+        - record: imagen:jobs_completed:rate5m
+          expr: sum(rate(imagen_jobs_completed_total[5m])) by (job_type, status)
+
+        # Job success rate percentage
+        - record: imagen:jobs_success_rate:ratio5m
+          expr: |
+            sum(rate(imagen_jobs_completed_total{status="success"}[5m])) by (job_type)
+            /
+            sum(rate(imagen_jobs_completed_total[5m])) by (job_type)
+
+        # P50 processing time by job type
+        - record: imagen:job_processing:p50
+          expr: |
+            histogram_quantile(0.50,
+              sum(rate(imagen_job_processing_seconds_bucket[5m])) by (le, job_type)
+            )
+
+        # P95 processing time by job type
+        - record: imagen:job_processing:p95
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(imagen_job_processing_seconds_bucket[5m])) by (le, job_type)
+            )
+
+        # P99 processing time by job type
+        - record: imagen:job_processing:p99
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(imagen_job_processing_seconds_bucket[5m])) by (le, job_type)
+            )
+
+        # Total jobs in flight (processing)
+        - record: imagen:jobs_in_progress:total
+          expr: sum(imagen_jobs_in_progress) by (job_type)
+
+        # Queue depth total across all queues
+        - record: imagen:queue_depth:total
+          expr: sum(imagen_queue_depth) by (queue_name)
+
+    # =========================================================================
+    # ALERTING RULES
+    # Define conditions that should trigger notifications
+    # =========================================================================
+    - name: imagen.alerting.rules
+      rules:
+        # -------------------------------------------------------------------
+        # CRITICAL ALERTS
+        # -------------------------------------------------------------------
+
+        # High error rate - jobs failing frequently
+        - alert: ImagenHighErrorRate
+          expr: |
+            (
+              sum(rate(imagen_jobs_completed_total{status="failed"}[5m]))
+              /
+              sum(rate(imagen_jobs_completed_total[5m]))
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "High job failure rate detected"
+            description: |
+              Job failure rate is {{ $value | humanizePercentage }} over the last 5 minutes.
+              This exceeds the 5% threshold.
+            runbook_url: "https://docs.example.com/runbooks/imagen-high-error-rate"
+
+        # Worker pods not running
+        - alert: ImagenWorkerDown
+          expr: |
+            absent(up{app=~".*-worker", namespace="imagen"} == 1)
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Imagen worker pods are down"
+            description: "No healthy worker pods detected in the imagen namespace for 5 minutes."
+            runbook_url: "https://docs.example.com/runbooks/imagen-worker-down"
+
+        # -------------------------------------------------------------------
+        # WARNING ALERTS
+        # -------------------------------------------------------------------
+
+        # Slow job processing
+        - alert: ImagenSlowProcessing
+          expr: imagen:job_processing:p95 > 60
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Job processing is slow"
+            description: |
+              P95 processing time for {{ $labels.job_type }} is {{ $value | humanizeDuration }}.
+              This exceeds the 60 second threshold.
+            runbook_url: "https://docs.example.com/runbooks/imagen-slow-processing"
+
+        # Queue backlog building up
+        - alert: ImagenQueueBacklog
+          expr: imagen:queue_depth:total > 100
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Queue backlog is building"
+            description: |
+              Queue {{ $labels.queue_name }} has {{ $value }} unprocessed messages.
+              Consider scaling up workers.
+            runbook_url: "https://docs.example.com/runbooks/imagen-queue-backlog"
+
+        # SLO burn rate - consuming error budget too fast
+        - alert: ImagenSLOBurnRateFast
+          expr: |
+            (
+              sum(rate(imagen_job_slo_violated_total[1h]))
+              /
+              sum(rate(imagen_jobs_completed_total[1h]))
+            ) > 0.02
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "SLO error budget burning fast"
+            description: |
+              {{ $value | humanizePercentage }} of jobs are violating SLO in the last hour.
+              At this rate, the monthly error budget will be exhausted.
+            runbook_url: "https://docs.example.com/runbooks/imagen-slo-burn"
+
+        # -------------------------------------------------------------------
+        # INFO ALERTS
+        # -------------------------------------------------------------------
+
+        # Worker scaling up
+        - alert: ImagenWorkersScalingUp
+          expr: |
+            changes(kube_deployment_spec_replicas{namespace="imagen", deployment=~".*-worker"}[5m]) > 0
+          for: 1m
+          labels:
+            severity: info
+            team: platform
+          annotations:
+            summary: "Workers are scaling up"
+            description: "{{ $labels.deployment }} is scaling up due to increased load."
